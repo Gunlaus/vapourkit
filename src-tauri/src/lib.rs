@@ -6,7 +6,6 @@ mod encoder;
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use tauri::Manager;
 use std::time::{Duration, Instant};
 
 #[derive(serde::Serialize)]
