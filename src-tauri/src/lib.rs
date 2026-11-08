@@ -1,3 +1,5 @@
+mod discovery;
+
 //! Native host services. Electron remains the production host until parity.
 
 use std::process::{Command, Stdio};
@@ -109,10 +111,17 @@ async fn probe_dependency(tool: String) -> Result<DependencyProbe, String> {
         .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn discover_dependency(tool: String) -> Result<discovery::ToolLocation, String> {
+    tauri::async_runtime::spawn_blocking(move || discovery::discover(&tool))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![host_status, probe_dependency])
+        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency])
         .run(tauri::generate_context!())
         .expect("error while running Vapourkit Tauri host");
 }
