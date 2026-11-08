@@ -2,8 +2,11 @@
 
 mod discovery;
 mod metadata;
+mod encoder;
 
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use tauri::Manager;
 use std::time::{Duration, Instant};
 
 #[derive(serde::Serialize)]
@@ -126,10 +129,23 @@ async fn inspect_media(path: String) -> Result<metadata::MediaInfo, String> {
         .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn encode_sample(app: tauri::AppHandle, state: tauri::State<'_, Arc<encoder::EncoderState>>, input: String, output: String) -> Result<(), String> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || encoder::transcode(app, state, input, output))
+        .await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn cancel_sample(state: tauri::State<'_, Arc<encoder::EncoderState>>) -> Result<bool, String> {
+    encoder::cancel(state.inner())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media])
+        .manage(Arc::new(encoder::EncoderState::default()))
+        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample])
         .run(tauri::generate_context!())
         .expect("error while running Vapourkit Tauri host");
 }
