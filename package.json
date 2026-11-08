@@ -17,7 +17,10 @@
         "preview": "vite preview",
         "test": "vitest run",
         "test:watch": "vitest",
-        "test:electron": "vitest run -c vitest.config.electron.ts"
+        "test:electron": "vitest run -c vitest.config.electron.ts",
+        "build:renderer": "tsc && vite build",
+        "dev:tauri": "tauri dev",
+        "build:tauri": "tauri build --no-bundle"
     },
     "keywords": [
         "video",
@@ -48,7 +51,8 @@
         "typescript": "^5.9.3",
         "vite": "^5.4.3",
         "vitest": "^4.1.0",
-        "wait-on": "^8.0.1"
+        "wait-on": "^8.0.1",
+        "@tauri-apps/cli": "^2.0.0"
     },
     "dependencies": {
         "@codemirror/lang-python": "^6.2.1",
