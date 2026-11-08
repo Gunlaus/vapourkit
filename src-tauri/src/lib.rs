@@ -6,6 +6,7 @@ mod encoder;
 mod settings;
 mod profiles;
 mod vapoursynth;
+mod script_check;
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -175,11 +176,17 @@ async fn vapoursynth_preflight() -> Result<vapoursynth::Preflight, String> {
     tauri::async_runtime::spawn_blocking(vapoursynth::check).await.map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn inspect_vapoursynth_script(script: String) -> Result<script_check::ScriptCheck, String> {
+    tauri::async_runtime::spawn_blocking(move || script_check::inspect_script(script))
+        .await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(encoder::EncoderState::default()))
-        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample, load_native_settings, save_native_settings, list_native_profiles, save_native_profile, delete_native_profile, vapoursynth_preflight])
+        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample, load_native_settings, save_native_settings, list_native_profiles, save_native_profile, delete_native_profile, vapoursynth_preflight, inspect_vapoursynth_script])
         .run(tauri::generate_context!())
         .expect("error while running Vapourkit Tauri host");
 }
