@@ -237,7 +237,7 @@ pub fn validate_paths(input: &str, output: &str) -> Result<(PathBuf, PathBuf), S
     Ok((source, destination))
 }
 
-fn script_path(script: &str) -> Result<PathBuf, String> {
+pub(crate) fn script_path(script: &str) -> Result<PathBuf, String> {
     let path = Path::new(script)
         .canonicalize()
         .map_err(|e| e.to_string())?;

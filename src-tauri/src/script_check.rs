@@ -1,7 +1,6 @@
 //! Validate a user-selected VapourSynth script using vspipe --info.
 //! This executes the selected script and its imports. Only run trusted scripts.
 use serde::Serialize;
-use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Serialize)]
@@ -13,12 +12,7 @@ pub struct ScriptCheck {
 }
 
 pub fn inspect_script(script: String) -> Result<ScriptCheck, String> {
-    let path = PathBuf::from(&script)
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("vpy") {
-        return Err("Select an existing .vpy script".into());
-    }
+    let path = super::encoder::script_path(&script)?;
     let vspipe = super::discovery::discover("vspipe")?;
     if !vspipe.available {
         return Err(format!("VSPipe unavailable: {}", vspipe.detail));

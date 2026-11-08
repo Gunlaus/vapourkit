@@ -4,7 +4,7 @@ import path from 'node:path';
 import ts from 'typescript';
 
 const root = process.cwd();
-const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8');
+const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const parse = (file: string) => ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
 const visit = (node: ts.Node, fn: (node: ts.Node) => void) => { fn(node); node.forEachChild(child => visit(child, fn)); };
 const source = parse('electron/preload.ts');

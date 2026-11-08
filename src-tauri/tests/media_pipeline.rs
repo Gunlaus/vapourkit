@@ -162,6 +162,9 @@ fn renders_vapoursynth_video_and_muxes_source_audio() {
     let script = dir.path().join("trusted ü.vpy");
     std::fs::write(&script, "import vapoursynth as vs\nvs.core.std.BlankClip(width=128, height=96, length=24, fpsnum=24, format=vs.YUV420P8).set_output()\n").unwrap();
     let output = dir.path().join("rendered.mkv").to_str().unwrap().to_owned();
+    let preflight = vapourkit_lib::vapoursynth::check().unwrap();
+    assert!(preflight.available, "{}", preflight.detail);
+    assert_eq!(preflight.version, "R79");
     let check =
         vapourkit_lib::script_check::inspect_script(script.to_str().unwrap().into()).unwrap();
     assert!(check.valid, "{}", check.details);

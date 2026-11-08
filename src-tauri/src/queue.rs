@@ -142,22 +142,16 @@ impl QueueState {
                 {
                     return Err("Another job already targets this output".into());
                 }
+                if let Some(script) = &request.script {
+                    let path = encoder::script_path(script)?;
+                    request.script = Some(path.to_string_lossy().into_owned());
+                }
                 for path in [&request.input, &request.output]
                     .into_iter()
                     .chain(request.script.iter())
                 {
                     if path.len() > 4096 {
                         return Err("Path exceeds 4096 bytes".into());
-                    }
-                }
-                if let Some(script) = &request.script {
-                    let path = std::path::Path::new(script);
-                    if !path.is_file()
-                        || !path
-                            .extension()
-                            .is_some_and(|e| e.eq_ignore_ascii_case("vpy"))
-                    {
-                        return Err("Choose an existing trusted .vpy script".into());
                     }
                 }
                 next.next_id = next
@@ -417,6 +411,37 @@ mod tests {
         let snapshot = state.snapshot().unwrap();
         assert_eq!(snapshot.jobs[0].status, JobStatus::Completed);
         assert_eq!(snapshot.jobs[1].status, JobStatus::Queued);
+    }
+    #[test]
+    fn stores_canonical_script_path_for_reload() {
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir_in(&cwd).unwrap();
+        let script = dir.path().join("trusted.VPY");
+        let source = dir.path().join("source.mkv");
+        std::fs::write(&script, b"# trusted test script").unwrap();
+        std::fs::write(&source, b"source").unwrap();
+        let state = QueueState::open(dir.path().join("queue.json")).unwrap();
+        state
+            .edit(Edit::Add {
+                request: JobRequest {
+                    input: source.to_string_lossy().into_owned(),
+                    output: dir.path().join("out.mkv").to_string_lossy().into_owned(),
+                    options: EncodeOptions::default(),
+                    script: Some(
+                        script
+                            .strip_prefix(cwd)
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                },
+            })
+            .unwrap();
+        let snapshot = state.snapshot().unwrap();
+        assert_eq!(
+            snapshot.jobs[0].request.script.as_deref(),
+            script.canonicalize().unwrap().to_str()
+        );
     }
     #[test]
     fn failed_write_does_not_mutate_queue() {
