@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import NativeBatchQueue from './NativeBatchQueue';
 
 type HostStatus = { host: string; migrationStage: string; platform: string };
 type DependencyProbe = { tool: string; available: boolean; detail: string; source: string; path: string };
@@ -23,6 +24,8 @@ export default function TauriMigrationStatus() {
   const [profiles, setProfiles] = useState<NativeProfile[]>([]);
   const [profileName, setProfileName] = useState('');
   const [vsStatus, setVsStatus] = useState<VsPreflight | null>(null);
+  const [scriptPath, setScriptPath] = useState('');
+  const [scriptResult, setScriptResult] = useState('');
   const [encoder, setEncoder] = useState('libx264');
   const [quality, setQuality] = useState(20);
   const [preset, setPreset] = useState('medium');
@@ -173,6 +176,12 @@ export default function TauriMigrationStatus() {
             <div className="flex flex-wrap gap-2">{profiles.map(p => <button key={p.name} className="rounded border border-zinc-600 px-3 py-1" onClick={() => applyProfile(p)}>{p.name}</button>)}</div>
             <button className="bg-zinc-700 rounded px-3 py-2" onClick={() => void invoke<VsPreflight>('vapoursynth_preflight').then(setVsStatus).catch(e => setError(String(e)))}>Check VapourSynth runtime</button>
             {vsStatus && <p className="text-sm break-words">{vsStatus.available ? 'Available' : 'Unavailable'}: {vsStatus.detail} ({vsStatus.python})</p>}
+            <label className="block text-sm">Trusted VapourSynth script (.vpy)
+              <input className="block w-full bg-zinc-900 border border-zinc-700 rounded p-2 mt-1" value={scriptPath} onChange={e => setScriptPath(e.target.value)} placeholder="Absolute path to trusted .vpy script" />
+            </label>
+            <button className="bg-zinc-700 rounded px-3 py-2" disabled={!scriptPath} onClick={() => void invoke<{valid:boolean;details:string}>('inspect_vapoursynth_script', {script:scriptPath}).then(r => setScriptResult(`${r.valid ? 'Valid' : 'Failed'}: ${r.details}`)).catch(e => setScriptResult(String(e)))}>Validate script</button>
+            <p className="text-xs text-zinc-400">Validation executes the selected script through VSPipe. Only use scripts you trust.</p>
+            {scriptResult && <pre className="text-xs whitespace-pre-wrap break-all">{scriptResult}</pre>}
           </div>
           <div className="flex flex-wrap gap-3">
             <button className="rounded bg-zinc-700 px-4 py-2" onClick={() => void inspect()} disabled={!input || encoding}>Inspect tracks</button>
@@ -190,6 +199,7 @@ export default function TauriMigrationStatus() {
           </div>}
           {progress && <p role="status">{progress.status}: {progress.detail} {progress.outTimeMs !== null ? `| ${(progress.outTimeMs / 1000).toFixed(1)}s` : ''} {progress.speed || ''}</p>}
         </section>
+        <NativeBatchQueue options={{ encoder, quality, preset, audioTracks, subtitleTracks, copyAudio }} />
       </div>
     </main>
   );
