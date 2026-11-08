@@ -1,6 +1,6 @@
 # Vapourkit: Tauri 2 migration
 
-Status: **Foundation only. Not a functional Electron replacement.**
+Status: **Experimental native diagnostics available. Not a functional Electron replacement.**
 
 ## Guardrails
 
@@ -45,8 +45,8 @@ npm install
 npm run dev:tauri
 ```
 
-`npm run build:tauri` builds the experimental host but **does not create production bundles**. The current React UI still calls `window.electronAPI`, so it is not yet operational under Tauri. Use Electron for normal Vapourkit use.
+`npm run build:tauri` builds the experimental host but **does not create production bundles**. Tauri loads a separate diagnostic screen while Electron loads the existing application. The production React UI still depends on `window.electronAPI` and is not yet operational under Tauri. Use Electron for normal Vapourkit use.
 
 ## Verification status
 
-The GitHub connector can edit repository files but cannot execute local Rust builds, VapourSynth workloads, or GPU tests. No compilation or runtime verification has been performed for this initial scaffold.
+The GitHub connector can edit repository files but cannot execute local Rust builds, VapourSynth workloads, or GPU tests. No compilation or runtime verification has been performed for these changes. Run `npm install`, `npm run dev:tauri`, and `cargo test --manifest-path src-tauri/Cargo.toml` in a suitable development environment. The dependency probes only check executable discovery and version output, not functional encoding or inference.
