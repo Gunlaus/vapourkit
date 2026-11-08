@@ -15,3 +15,7 @@
 
 # Native plugin build output
 native/*/build/
+
+# Tauri build artifacts
+/src-tauri/target/
+/src-tauri/gen/

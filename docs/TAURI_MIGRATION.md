@@ -1,52 +1,98 @@
 # Vapourkit: Tauri 2 migration
 
-Status: **Experimental native diagnostics available. Not a functional Electron replacement.**
+Status: **Native processing preview; not a production Electron replacement.**
 
-## Guardrails
+## What runs under Tauri
 
-- Keep the existing Electron application runnable until all production IPC endpoints have been migrated and tested.
-- Preserve the React UI, VapourSynth/Python runtime, FFmpeg pipeline, models, user settings, queues, templates, and workflows.
-- Do not silently change the portable Windows data directory or Linux XDG-backed storage.
-- Do not label the migration complete merely because the Tauri window starts.
-- Do not enable broad filesystem, shell, or process permissions in the frontend. Rust must validate all privileged operations.
+The separate React preview now uses a typed adapter in `src/native/host.ts` and Rust services for:
 
-## Current baseline
+- Discovering FFmpeg, FFprobe, Python, and VSPipe in installed Vapourkit data and on PATH. Linux discovery includes `$XDG_CONFIG_HOME/vapourkit-gui/data` (or `~/.config/vapourkit-gui/data`) and wheel-installed `lib/python3.X/site-packages/vapoursynth/vspipe`.
+- Inspecting media streams and selecting audio/subtitle stream indices. Video uses x264/x265 or an explicitly selected NVENC encoder; a fixed test-frame probe reports whether the encoder can actually initialize.
+- Encoding a source video, or piping output 0 of a **trusted, existing `.vpy` script** through VSPipe's Matroska output into FFmpeg. Selected source audio/subtitles and metadata are muxed alongside rendered video. The script must preserve source timing; graphical chains, trim synchronization, and model management are not yet ported.
+- Progress events, a reserved encoding slot, cancellation of FFmpeg and VSPipe, cleanup/reaping on failure, and bounded concurrent output capture. Linux workloads use independent process groups so helper processes cannot keep capture pipes open after timeout.
+- Individual JPEG frame previews over binary IPC. Full-resolution frames are not serialized into JSON events. This is not the production streaming chain-preview protocol.
+- Native input/script/output dialogs. Cancelling a dialog preserves the previous selection.
+- A Rust-owned, sequential queue with per-job option/script snapshots, atomic persistence before state transitions, retry/remove/clear-finished, and applying encoding options to pending jobs. UI reloads resubscribe to the running queue. Stale snapshots cannot replace newer state. An interrupted job is marked failed on restart and never automatically rerun.
+- Native encoding profiles and explicit default-encoder settings, saved atomically with synchronized files. Corrupt persisted JSON is reported and preserved instead of silently replaced. Windows replacement does not delete the previous document first.
 
-- React + Vite renderer in `src/`.
-- Electron main process and IPC handlers in `electron/`.
-- Electron preload exposes a large `window.electronAPI` surface, including synchronous queue persistence and transferable preview ports.
-- FFmpeg, VapourSynth, Python, CUDA and model operations are external native processes or runtimes. They remain separate from the UI host.
-- The existing `npm run dev`, `npm run build` and Electron packaging scripts remain the supported path.
+Every encode writes to its own temporary file in the destination directory and publishes it using a no-clobber operation only after both processes succeed. Existing files, including files created while encoding, are preserved. Normal cancellation/failure removes the temporary file. An abrupt OS/process termination can leave an app-created hidden `.vapourkit-*` file; it is not treated as a completed output.
 
-## Migration stages
+Closing the window is blocked while encoding or the queue is active, with a visible instruction to stop processing first. Forced application exit requests cancellation. Queue transitions already on disk recover conservatively on the next launch.
 
-1. **Foundation**: minimal Tauri 2 host and independent dev/build scripts; retain Electron unchanged.
-2. **Contract inventory**: map each preload method and event to a typed command/event contract, including error semantics, cancellation, and streaming previews.
-3. **Rust services**: introduce config/data migration, diagnostics, process supervision, FFmpeg/VapourSynth discovery, hardware probes, and validated command execution. Test each service before wiring it to the UI.
-4. **Renderer adapter**: introduce a typed host interface; switch feature groups to Tauri only after matching Electron behavior. Do not make the UI depend on two incompatible globals.
-5. **Critical fixes**: NVENC detection/errors, imported filter validation, filter-picker cancellation, richer encoding controls, preview toggle, batch apply, and track selection.
-6. **Stabilization**: Windows and Linux CI builds, packaging and runtime resource validation, migration tests, hardware smoke tests, and removal of Electron only after parity.
+## Data compatibility and permissions
 
-## Important technical risks
+Production Electron configuration, queues, models, templates, workflows, and runtimes are not rewritten. Runtime discovery reads the existing data layout. Preview-owned settings, profiles, and queue remain isolated:
 
-- `webUtils.getPathForFile` and Electron's custom `video://` protocol need secure Tauri equivalents.
-- Electron `MessagePort`-based preview playback needs a measured replacement; do not send full-resolution frames through JSON events.
-- `ipcRenderer.sendSync` queue persistence must be replaced with a durable async design and flush-on-shutdown strategy.
-- Existing portable Windows user data must remain discoverable after migration.
-- Linux AppImage and native dependencies need separate integration tests.
-- Tauri uses the OS webview; memory and rendering behavior must be benchmarked, not assumed.
+- Windows: `data/tauri-preview/` beside the native executable.
+- Linux: `$XDG_CONFIG_HOME/vapourkit-tauri-preview/` or `~/.config/vapourkit-tauri-preview/`.
 
-## Developer commands (foundation)
+This isolation is deliberate until the production schemas and their migration tests are implemented. It is not a completed migration of Electron user data.
 
-Install Rust and Tauri 2 prerequisites for the target OS, then run:
+The frontend has no broad shell, filesystem, or process plugin permission. Rust exposes fixed commands, validates encoding options/paths/track selections, and never executes a shell. Native file dialogs use the Rust dialog plugin. Production CSP restricts scripts to packaged sources; development permits Vite's inline refresh preamble. Trusted VapourSynth scripts still execute Python and imports, as the UI explicitly states.
+
+## Remaining production migration
+
+`docs/TAURI_CONTRACT.json` inventories **135 Electron methods** and the native commands. Its `productionAdapter` entries are intentionally pending: preview building blocks have different contracts and must not be mistaken for a compatible `window.electronAPI` implementation. `npm run check:tauri-contract` checks the inventory and that every typed native invocation is registered in Rust.
+
+| Area | Native preview | Work required before production replacement |
+| --- | --- | --- |
+| Main renderer/host adapter | Separate typed preview adapter | Port the production renderer's contracts, event payloads, errors, and host detection; mount the original UI only after parity |
+| Runtime/setup | Existing-runtime discovery and import checks | Windows embedded Python/bootstrap, Linux venv setup, downloads, plugins, compatibility checks, repair/update/uninstall and cancellation |
+| GPU/providers/models | Functional NVENC initialization probe; scripts may use installed runtimes | Backend detection, GPU statistics, ONNX validation/import/metadata/categories, TensorRT engine builds, NCNN/DirectML/MIGraphX setup and provider selection |
+| Filters/workflows | Render existing trusted scripts | Port script generation/chain graphs, template catalog and validation/import/export/update reconciliation, workflow and LUT APIs, reference alignment and cancellation |
+| Encoding | Fixed typed options, source track mapping and trusted-script pipeline | Production rate control/colorimetry/container controls, frame/trim/VFR synchronization, processing formats, benchmarking and complete encoder parity |
+| Preview/media | Metadata, native pickers and binary still frames | File-drop path handling, secure video playback protocol, warm chain sessions, credit/backpressure streaming, comparison and external preview launch |
+| Persistence | Durable native queue/profiles/settings | Import production schemas without data loss, portable Windows and Linux fixture tests, production queue adapter and shutdown semantics |
+| Platform/integration | Tauri host build configuration and CSP | Production resource staging, branded installers/AppImage, update/log/report services, external URL/folder controls, Discord integration and other ancillary contracts |
+| Validation | Core Rust/media tests and browser contract smoke | Windows/Linux webview runs, GPU workloads on supported hardware, all production renderer workflows, resource/migration/package tests and memory/performance comparison |
+
+Do not remove Electron, enable production bundles, or mark the migration complete until these contracts and platform checks pass. `src/main.tsx` continues loading the Electron application under Electron and the separate preview under Tauri.
+
+## Development and verification
+
+Existing Electron commands remain supported:
 
 ```sh
-npm install
-npm run dev:tauri
+npm ci
+npm run build
+npm test
+npm run test:electron
 ```
 
-`npm run build:tauri` builds the experimental host but **does not create production bundles**. Tauri loads a separate diagnostic screen while Electron loads the existing application. The production React UI still depends on `window.electronAPI` and is not yet operational under Tauri. Use Electron for normal Vapourkit use.
+For the native preview, install Rust plus the Tauri 2 prerequisites for the OS:
 
-## Verification status
+```sh
+npm ci --ignore-scripts
+npm run dev:tauri
+npm run build:tauri -- -- --locked
+```
 
-The GitHub connector can edit repository files but cannot execute local Rust builds, VapourSynth workloads, or GPU tests. No compilation or runtime verification has been performed for these changes. Run `npm install`, `npm run dev:tauri`, and `cargo test --manifest-path src-tauri/Cargo.toml` in a suitable development environment. The dependency probes only check executable discovery and version output, not functional encoding or inference.
+The last command builds an experimental executable without production bundling. A committed Cargo lockfile and `npm ci` keep dependency resolution reproducible. CI runs Windows/Linux desktop compilation without repository write permission or automatic commits.
+
+Rust services can be tested without GTK/WebKit:
+
+```sh
+cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
+cargo clippy --locked --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+npm run check:tauri-contract
+```
+
+Real media integration tests create short videos and exercise selected audio, Unicode paths, binary previews, cancellation, late output conflicts, and actual VapourSynth rendering:
+
+```sh
+# FFmpeg must be on PATH. The script-render test additionally needs a configured
+# VSPipe/VapourSynth R79 environment on PATH (python -m vapoursynth config).
+cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features --test media_pipeline -- --ignored
+```
+
+Browser UI checks use a mocked Tauri transport to verify picker cancellation, script and track snapshots, applying options, stale events, stop/retry, running-state recovery on reload, and StrictMode listener cleanup. They do not replace native webview tests:
+
+```sh
+npx playwright install chromium
+npm run test:tauri-ui
+# Or use an existing Chromium:
+# PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/chromium npm run test:tauri-ui
+```
+
+The local validation environment can execute core Rust, actual FFmpeg/VapourSynth R79, TypeScript, and Chromium tests. It lacks GTK/WebKit development packages and an administrator installer, so local native-desktop compilation is unavailable; Windows/Linux desktop build results must come from CI. GPU inference and hardware compatibility are not established by CPU media tests.

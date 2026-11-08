@@ -24,8 +24,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    strictPort: true,
     watch: {
-      ignored: ['**/data/**', '**/data2/**', '**/release/**']
+      ignored: ['**/data/**', '**/data2/**', '**/release/**', '**/src-tauri/**']
     }
   }
 })

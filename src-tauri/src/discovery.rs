@@ -1,7 +1,6 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,20 +14,52 @@ pub struct ToolLocation {
 
 fn relative_tool(tool: &str) -> Option<&'static str> {
     match tool {
-        "ffmpeg" => Some(if cfg!(windows) { "ffmpeg/bin/ffmpeg.exe" } else { "ffmpeg/bin/ffmpeg" }),
-        "ffprobe" => Some(if cfg!(windows) { "ffmpeg/bin/ffprobe.exe" } else { "ffmpeg/bin/ffprobe" }),
-        "python" => Some(if cfg!(windows) { "vapoursynth-portable/python.exe" } else { "vapoursynth-portable/bin/python3" }),
-        "vspipe" => Some(if cfg!(windows) { "vapoursynth-portable/Lib/site-packages/vapoursynth/vspipe.exe" } else { "" }),
+        "ffmpeg" => Some(if cfg!(windows) {
+            "ffmpeg/bin/ffmpeg.exe"
+        } else {
+            "ffmpeg/bin/ffmpeg"
+        }),
+        "ffprobe" => Some(if cfg!(windows) {
+            "ffmpeg/bin/ffprobe.exe"
+        } else {
+            "ffmpeg/bin/ffprobe"
+        }),
+        "python" => Some(if cfg!(windows) {
+            "vapoursynth-portable/python.exe"
+        } else {
+            "vapoursynth-portable/bin/python3"
+        }),
+        "vspipe" => Some(if cfg!(windows) {
+            "vapoursynth-portable/Lib/site-packages/vapoursynth/vspipe.exe"
+        } else {
+            ""
+        }),
         _ => None,
     }
 }
 
 fn executable(tool: &str) -> Option<&'static str> {
     match tool {
-        "ffmpeg" => Some(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }),
-        "ffprobe" => Some(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" }),
-        "vspipe" => Some(if cfg!(windows) { "vspipe.exe" } else { "vspipe" }),
-        "python" => Some(if cfg!(windows) { "python.exe" } else { "python3" }),
+        "ffmpeg" => Some(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        }),
+        "ffprobe" => Some(if cfg!(windows) {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        }),
+        "vspipe" => Some(if cfg!(windows) {
+            "vspipe.exe"
+        } else {
+            "vspipe"
+        }),
+        "python" => Some(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python3"
+        }),
         _ => None,
     }
 }
@@ -36,16 +67,28 @@ fn executable(tool: &str) -> Option<&'static str> {
 /// Only discover under known Vapourkit data roots; never accept a renderer-supplied root.
 fn data_roots(exe: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if let Some(parent) = exe.parent() {
-        roots.push(parent.join("data"));
-        // Development layouts may put the executable under src-tauri/target/release.
-        for ancestor in parent.ancestors().take(5) {
-            roots.push(ancestor.join("data"));
-        }
+    if cfg!(debug_assertions) {
+        roots.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join("data"),
+        );
     }
+    if cfg!(windows) {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.join("data"));
+        }
+    } else if let Ok(base) = super::storage::config_base() {
+        roots.push(base.join("vapourkit-gui/data"));
+    }
+    // Older preview builds used these paths. Read-only fallback, after production.
     if !cfg!(windows) {
-        if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-            roots.push(PathBuf::from(xdg).join("vapourkit/data"));
+        if let Some(xdg) = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+        {
+            roots.push(xdg.join("vapourkit/data"));
         }
         if let Some(home) = std::env::var_os("HOME") {
             roots.push(PathBuf::from(home).join(".local/share/vapourkit/data"));
@@ -63,51 +106,77 @@ fn candidates(tool: &str, exe: &Path) -> Result<Vec<(PathBuf, &'static str)>, St
             result.push((root.join(relative), "vapourkit-data"));
         }
     }
-    // vspipe on Linux may be a venv console script rather than a binary in site-packages.
+    // The Linux wheel installs vspipe in lib/pythonX.Y/site-packages/vapoursynth,
+    // not necessarily as a console entry point in bin/. Never execute Python to
+    // discover site-packages; inspect only the known venv's immediate lib entries.
     if tool == "vspipe" && !cfg!(windows) {
         for root in data_roots(exe) {
-            result.push((root.join("vapoursynth-portable/bin/vspipe"), "vapourkit-data"));
+            let venv = root.join("vapoursynth-portable");
+            if let Ok(entries) = std::fs::read_dir(venv.join("lib")) {
+                let mut versions: Vec<_> = entries
+                    .filter_map(Result::ok)
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("python3."))
+                    .map(|e| e.path())
+                    .collect();
+                versions.sort();
+                for version in versions {
+                    result.push((
+                        version.join("site-packages/vapoursynth/vspipe"),
+                        "vapourkit-data",
+                    ));
+                }
+            }
+            result.push((venv.join("bin/vspipe"), "vapourkit-data"));
         }
     }
-    result.push((PathBuf::from(executable(tool).ok_or("Unsupported tool")?), "system-path"));
+    result.push((
+        PathBuf::from(executable(tool).ok_or("Unsupported tool")?),
+        "system-path",
+    ));
     Ok(result)
 }
 
 fn run_version(path: &Path, tool: &str) -> ToolLocation {
-    let args: &[&str] = if tool == "vspipe" || tool == "python" { &["--version"] } else { &["-version"] };
-    let source = if path.components().count() == 1 { "system-path" } else { "vapourkit-data" };
-    let mut command = Command::new(path);
-    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+    let args: &[&str] = if tool == "vspipe" || tool == "python" {
+        &["--version"]
+    } else {
+        &["-version"]
+    };
+    let source = if path.components().count() == 1 {
+        "system-path"
+    } else {
+        "vapourkit-data"
+    };
+    let mut command = super::process::command(path);
+    command.args(args);
+    let (available, detail) =
+        match super::process::capture(&mut command, Duration::from_secs(5), 16384) {
+            Ok(output) => {
+                let bytes = if output.stdout.is_empty() {
+                    &output.stderr
+                } else {
+                    &output.stdout
+                };
+                (
+                    output.status.success(),
+                    String::from_utf8_lossy(bytes)
+                        .lines()
+                        .next()
+                        .unwrap_or("No version output")
+                        .chars()
+                        .take(300)
+                        .collect(),
+                )
+            }
+            Err(error) => (false, error),
+        };
+    ToolLocation {
+        tool: tool.into(),
+        source,
+        path: path.display().to_string(),
+        available,
+        detail,
     }
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => return ToolLocation {
-            tool: tool.into(), source, path: path.display().to_string(),
-            available: false, detail: error.to_string(),
-        },
-    };
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let timed_out = loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break false,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            _ => { let _ = child.kill(); break true; }
-        }
-    };
-    let output = child.wait_with_output();
-    let (available, detail) = match output {
-        Ok(output) if !timed_out => {
-            let bytes = if output.stdout.is_empty() { &output.stderr } else { &output.stdout };
-            (output.status.success(), String::from_utf8_lossy(bytes).lines().next().unwrap_or("No version output").chars().take(300).collect())
-        }
-        Ok(_) => (false, "Version probe timed out after 5 seconds".into()),
-        Err(error) => (false, error.to_string()),
-    };
-    ToolLocation { tool: tool.into(), source, path: path.display().to_string(), available, detail }
 }
 
 pub fn discover(tool: &str) -> Result<ToolLocation, String> {
@@ -115,14 +184,21 @@ pub fn discover(tool: &str) -> Result<ToolLocation, String> {
     let options = candidates(tool, &exe)?;
     let mut fallback = None;
     for (path, _) in options {
-        if path.components().count() > 1 && !path.is_file() { continue; }
+        if path.components().count() > 1 && !path.is_file() {
+            continue;
+        }
         let probe = run_version(&path, tool);
-        if probe.available { return Ok(probe); }
+        if probe.available {
+            return Ok(probe);
+        }
         fallback = Some(probe);
     }
     Ok(fallback.unwrap_or(ToolLocation {
-        tool: tool.into(), source: "not-found", path: String::new(),
-        available: false, detail: "Not found in Vapourkit data or system PATH".into(),
+        tool: tool.into(),
+        source: "not-found",
+        path: String::new(),
+        available: false,
+        detail: "Not found in Vapourkit data or system PATH".into(),
     }))
 }
 

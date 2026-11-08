@@ -4,65 +4,83 @@ on:
   pull_request:
     paths:
       - 'src-tauri/**'
+      - 'src/Native*.tsx'
+      - 'src/native/**'
       - 'src/TauriMigrationStatus.tsx'
       - 'src/main.tsx'
+      - 'vite.config.ts'
       - 'package.json'
       - 'package-lock.json'
+      - 'scripts/tauri*'
+      - 'docs/TAURI*'
       - '.github/workflows/tauri-migration.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Linux Tauri prerequisites
+      - name: Linux Tauri and media prerequisites
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
-      - name: Install frontend dependencies and reconcile migration lockfile
-        run: npm install --no-audit --no-fund
-      - name: Commit reconciled npm lockfile (same-repository PR only)
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && matrix.os == 'ubuntu-22.04'
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg python3-venv libpython3.12
+      - name: Install locked frontend dependencies
+        # Electron/ONNX native postinstalls are not used by the Tauri host.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check renderer and migration inventory
+        run: |
+          npm run build:renderer
+          npm run check:tauri-contract
+      - name: Browser contract smoke test
+        if: runner.os == 'Linux'
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:tauri-ui
+      - name: Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Rust service tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features
+      - name: Rust service lint
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --no-default-features --all-targets -- -D warnings
+      - name: Real FFmpeg and VapourSynth R79 pipeline tests
+        if: runner.os == 'Linux'
         shell: bash
         run: |
-          if ! git diff --quiet -- package-lock.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "build: synchronize npm lockfile for Tauri"
-            git fetch origin feat/tauri-rust-overhaul
-            git rebase origin/feat/tauri-rust-overhaul
-            git push origin HEAD:refs/heads/feat/tauri-rust-overhaul
-          fi
-      - name: Check renderer
-        run: npm run build:renderer
-      - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+          python3 -m venv "$RUNNER_TEMP/vapourkit-vs"
+          "$RUNNER_TEMP/vapourkit-vs/bin/python" -m pip install vapoursynth==79
+          XDG_CONFIG_HOME="$RUNNER_TEMP/vs-config" "$RUNNER_TEMP/vapourkit-vs/bin/vapoursynth" config
+          PATH="$RUNNER_TEMP/vapourkit-vs/bin:$PATH" XDG_CONFIG_HOME="$RUNNER_TEMP/vs-config" cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features --test media_pipeline -- --ignored
+      - name: Desktop host tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Build experimental Tauri host
-        run: npm run build:tauri
-      - name: Upload Windows diagnostic executable
-        if: runner.os == 'Windows'
+        run: npm run build:tauri -- -- --locked
+      - name: Upload native preview executable
         uses: actions/upload-artifact@v4
         with:
-          name: vapourkit-tauri-diagnostics-windows
-          path: src-tauri/target/release/vapourkit.exe
+          name: vapourkit-tauri-preview-${{ runner.os }}
+          path: |
+            src-tauri/target/release/vapourkit.exe
+            src-tauri/target/release/vapourkit
           if-no-files-found: error
           retention-days: 14

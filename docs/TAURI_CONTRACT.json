@@ -1,0 +1,1849 @@
+{
+  "schemaVersion": 1,
+  "productionRendererReady": false,
+  "note": "Preview building blocks have distinct contracts. They do not implement the production electronAPI; no endpoint is marked complete until the original UI and persisted schema are migrated and tested.",
+  "previewTransport": "Electron preview-port transfers MessagePorts; Tauri currently provides individual JPEG frames over binary IPC, not streaming chain preview.",
+  "nativeCommands": [
+    "cancel_sample",
+    "check_native_encoder",
+    "delete_native_profile",
+    "discover_dependency",
+    "edit_native_queue",
+    "encode_sample",
+    "host_status",
+    "inspect_media",
+    "inspect_vapoursynth_script",
+    "list_native_profiles",
+    "load_native_settings",
+    "native_processing_status",
+    "native_queue_snapshot",
+    "read_native_frame",
+    "run_native_queue",
+    "save_native_profile",
+    "save_native_settings",
+    "select_native_file",
+    "select_native_output",
+    "stop_native_queue",
+    "vapoursynth_preflight"
+  ],
+  "electronMethods": [
+    {
+      "method": "platform",
+      "parameters": [],
+      "transports": [],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "checkDependencies",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "check-dependencies"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getNvencDriverProblem",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-nvenc-driver-problem"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "check_native_encoder"
+      ]
+    },
+    {
+      "method": "detectCudaSupport",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "detect-cuda-support"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getInferenceBackendInfo",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-inference-backend-info"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getGpuStats",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-gpu-stats"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setupDependencies",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "setup-dependencies"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onSetupProgress",
+      "parameters": [
+        "callback: (progress: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "setup-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "selectVideoFile",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-video-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "select_native_file"
+      ]
+    },
+    {
+      "method": "selectReferenceVideo",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-reference-video"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "select_native_file"
+      ]
+    },
+    {
+      "method": "alignSideChain",
+      "parameters": [
+        "params: { id: string; mainPath: string; refPath: string }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "align-side-chain"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "cancelAlign",
+      "parameters": [
+        "id: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "cancel-align"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onAlignProgress",
+      "parameters": [
+        "callback: (progress: { id: string; progress: number; message: string }) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "align-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "selectOnnxFile",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-onnx-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "selectTemplateFile",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-template-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getVideoInfo",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-video-info"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "inspect_media"
+      ]
+    },
+    {
+      "method": "onVideoIndexProgress",
+      "parameters": [
+        "callback: (progress: { percentage: number; complete: boolean }) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "video-index-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "readVideoFile",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "read-video-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getVideoThumbnail",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-video-thumbnail"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "read_native_frame"
+      ]
+    },
+    {
+      "method": "getVideoFrameAt",
+      "parameters": [
+        "filePath: string",
+        "frameNumber: number",
+        "fps: number"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-video-frame-at"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "read_native_frame"
+      ]
+    },
+    {
+      "method": "getOutputResolution",
+      "parameters": [
+        "videoPath: string",
+        "modelPath: string | null",
+        "defaultBackend?: string",
+        "upscalingEnabled?: boolean",
+        "filters?: any",
+        "upscalePosition?: number",
+        "numStreams?: number",
+        "sourceFps?: number"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-output-resolution"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "cancelValidation",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "cancel-validation"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewOpen",
+      "parameters": [
+        "videoPath: string",
+        "modelPath: string | null",
+        "defaultBackend?: string",
+        "upscalingEnabled?: boolean",
+        "filters?: any[]",
+        "numStreams?: number",
+        "segment?: { enabled: boolean; startFrame: number; endFrame: number }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-open"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewSelect",
+      "parameters": [
+        "index: number"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-select"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewFrame",
+      "parameters": [
+        "n: number",
+        "width: number"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-frame"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewCancel",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-cancel"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewClose",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-close"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewPlay",
+      "parameters": [
+        "options: {\n    stream: number; output: number; from: number; width: number;\n    credits: number; prefetch?: number;\n  }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-play"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "previewStop",
+      "parameters": [
+        "stream: number"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "preview-stop"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getFilePathFromFile",
+      "parameters": [
+        "file: File"
+      ],
+      "transports": [],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getAvailableModels",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-available-models"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getUninitializedModels",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-uninitialized-models"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "initializeModel",
+      "parameters": [
+        "params: any"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "initialize-model"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onModelInitProgress",
+      "parameters": [
+        "callback: (progress: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "model-init-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "importCustomModel",
+      "parameters": [
+        "params: any"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "import-custom-model"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onModelImportProgress",
+      "parameters": [
+        "callback: (progress: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "model-import-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getModelMetadata",
+      "parameters": [
+        "modelId: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-model-metadata"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "updateModelMetadata",
+      "parameters": [
+        "modelId: string",
+        "metadata: any"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-model-metadata"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "deleteModel",
+      "parameters": [
+        "modelPath: string",
+        "modelId: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "delete-model"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "renameModel",
+      "parameters": [
+        "modelPath: string",
+        "modelId: string",
+        "newName: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "rename-model"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "cancelModelImport",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "cancel-model-import"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "forceStopModelImport",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "force-stop-model-import"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "validateOnnxModel",
+      "parameters": [
+        "onnxPath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "validate-onnx-model"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getModelCategories",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-model-categories"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "updateModelCategory",
+      "parameters": [
+        "modelId: string",
+        "category: string | string[] | undefined"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-model-category"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "selectOutputFile",
+      "parameters": [
+        "defaultName: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-output-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "select_native_output"
+      ]
+    },
+    {
+      "method": "selectFolder",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "startUpscale",
+      "parameters": [
+        "videoPath: string",
+        "modelPath: string",
+        "outputPath: string",
+        "defaultBackend?: string",
+        "upscalingEnabled?: boolean",
+        "filters?: any",
+        "upscalePosition?: number",
+        "numStreams?: number",
+        "segment?: any",
+        "benchmarkMode?: boolean"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "start-upscale"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "encode_sample"
+      ]
+    },
+    {
+      "method": "cancelUpscale",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "cancel-upscale"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "cancel_sample"
+      ]
+    },
+    {
+      "method": "killUpscale",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "kill-upscale"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "cancel_sample"
+      ]
+    },
+    {
+      "method": "onUpscaleProgress",
+      "parameters": [
+        "callback: (progress: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "upscale-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "native-encode-progress"
+      ]
+    },
+    {
+      "method": "onEngineBuildProgress",
+      "parameters": [
+        "callback: (status: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "engine-build-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openOutputFolder",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-output-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "compareVideos",
+      "parameters": [
+        "inputPath: string",
+        "outputPath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "compare-videos"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "launchVsePreviewer",
+      "parameters": [
+        "videoPath: string",
+        "modelPath: string | null",
+        "defaultBackend?: string",
+        "upscalingEnabled?: boolean",
+        "filters?: any[]",
+        "numStreams?: number",
+        "segment?: { enabled: boolean; startFrame: number; endFrame: number }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "launch-vse-previewer"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openExternal",
+      "parameters": [
+        "url: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-external"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getVersion",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-version"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "readLogTail",
+      "parameters": [
+        "maxLines?: number"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "read-log-tail"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "resetLogCache",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "reset-log-cache"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openLogsFolder",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-logs-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openConfigFolder",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-config-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openVSPluginsFolder",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-vs-plugins-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openVSScriptsFolder",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-vs-scripts-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "dlssRuntimeStatus",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "dlss-runtime-status"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "dlssRuntimeImport",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "dlss-runtime-import"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getUpdateReport",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-report-get"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "markUpdateReportSeen",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-report-mark-seen"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "clearUpdateReport",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-report-clear"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "resolveTemplateDecision",
+      "parameters": [
+        "file: string",
+        "choice: 'replace' | 'keep' | 'remove'"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-report-resolve"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openTemplateBackups",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-report-open-backups"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getMissingBundledTemplates",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "templates-missing-bundled"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "restoreMissingBundledTemplates",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "templates-restore-bundled"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onDevConsoleLog",
+      "parameters": [
+        "callback: (log: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "dev-console-log"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getColorimetrySettings",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-colorimetry-settings"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setColorimetrySettings",
+      "parameters": [
+        "settings: any"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-colorimetry-settings"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getEncodingSettings",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-encoding-settings"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setEncodingSettings",
+      "parameters": [
+        "encoding: unknown"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-encoding-settings"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getDefaultFfmpegArgs",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-default-ffmpeg-args"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getVideoFilter",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-video-filter"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setVideoFilter",
+      "parameters": [
+        "filter: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-video-filter"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getOutputFormat",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-output-format"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setOutputFormat",
+      "parameters": [
+        "format: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-output-format"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getProcessingFormat",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-processing-format"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setProcessingFormat",
+      "parameters": [
+        "format: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-processing-format"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getVideoCompareArgs",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-video-compare-args"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setVideoCompareArgs",
+      "parameters": [
+        "args: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-video-compare-args"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getDefaultVideoCompareArgs",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-default-video-compare-args"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getDefaultOutputFolder",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-default-output-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setDefaultOutputFolder",
+      "parameters": [
+        "folder: string | null"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-default-output-folder"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getRocmSetting",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-rocm-setting"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setRocmSetting",
+      "parameters": [
+        "setting: { mode: string; customRoot?: string }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-rocm-setting"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getDescriptiveNamingEnabled",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-descriptive-naming-enabled"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setDescriptiveNamingEnabled",
+      "parameters": [
+        "enabled: boolean"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-descriptive-naming-enabled"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getDiscordRichPresenceSettings",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-discord-rich-presence-settings"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setDiscordRichPresenceSettings",
+      "parameters": [
+        "settings: { enabled: boolean }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-discord-rich-presence-settings"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setDiscordRichPresenceActivity",
+      "parameters": [
+        "activity: { details?: string; state?: string; startTimestamp?: number }"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-discord-rich-presence-activity"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "clearDiscordRichPresence",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "clear-discord-rich-presence"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getEncodingSettingsExpanded",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-encoding-settings-expanded"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setEncodingSettingsExpanded",
+      "parameters": [
+        "expanded: boolean"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-encoding-settings-expanded"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getShowQueue",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-show-queue"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setShowQueue",
+      "parameters": [
+        "show: boolean"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-show-queue"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "reloadBackend",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "reload-backend"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getFilterTemplates",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-filter-templates"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "saveFilterTemplate",
+      "parameters": [
+        "template: any"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "save-filter-template"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "deleteFilterTemplate",
+      "parameters": [
+        "name: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "delete-filter-template"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "readTemplateFile",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "read-template-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "importTemplateFile",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "import-template-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "fileExists",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "file-exists"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "selectWorkflowFile",
+      "parameters": [
+        "mode: 'open' | 'save'"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-workflow-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "exportWorkflow",
+      "parameters": [
+        "workflow: any",
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "export-workflow"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "importWorkflow",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "import-workflow"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "selectLutFile",
+      "parameters": [
+        "mode: 'open' | 'save'",
+        "defaultName?: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "select-lut-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "writeLutFile",
+      "parameters": [
+        "filePath: string",
+        "text: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "write-lut-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "readLutFile",
+      "parameters": [
+        "filePath: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "read-lut-file"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "installLut",
+      "parameters": [
+        "name: string",
+        "text: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "install-lut"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getFilterConfigurations",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-filter-configurations"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "setFilterConfigurations",
+      "parameters": [
+        "filters: any"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "set-filter-configurations"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "installPluginDependencies",
+      "parameters": [
+        "mode?: 'partial' | 'complete'"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "install-plugin-dependencies"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "retrySetupPlugins",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "retry-setup-plugins"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "uninstallPluginDependencies",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "uninstall-plugin-dependencies"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "checkPluginDependencies",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "check-plugin-dependencies"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "cancelPluginDependencyInstall",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "cancel-plugin-dependency-install"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onPluginDependencyProgress",
+      "parameters": [
+        "callback: (progress: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "plugin-dependency-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "checkForUpdates",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "check-for-updates"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openReleasesPage",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-releases-page"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "openReleaseUrl",
+      "parameters": [
+        "url: string"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "open-release-url"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "getQueue",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "get-queue"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "native_queue_snapshot"
+      ]
+    },
+    {
+      "method": "saveQueue",
+      "parameters": [
+        "queue: any[]"
+      ],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "save-queue"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "edit_native_queue"
+      ]
+    },
+    {
+      "method": "saveQueueSync",
+      "parameters": [
+        "queue: any[]"
+      ],
+      "transports": [
+        {
+          "transport": "sendSync",
+          "channel": "save-queue-sync"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "clearQueue",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "clear-queue"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": [
+        "edit_native_queue"
+      ]
+    },
+    {
+      "method": "checkVsMlrtVersion",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "check-vsmlrt-version"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "clearEngineFiles",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "clear-engine-files"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "updateVsMlrtVersion",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-vsmlrt-version"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "updateVsMlrtPlugin",
+      "parameters": [],
+      "transports": [
+        {
+          "transport": "invoke",
+          "channel": "update-vsmlrt-plugin"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    },
+    {
+      "method": "onVsMlrtUpdateProgress",
+      "parameters": [
+        "callback: (progress: any) => void"
+      ],
+      "transports": [
+        {
+          "transport": "on",
+          "channel": "vsmlrt-update-progress"
+        }
+      ],
+      "productionAdapter": "pending",
+      "previewBuildingBlocks": []
+    }
+  ]
+}

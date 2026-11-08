@@ -1,7 +1,6 @@
 use serde::Serialize;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,38 +33,37 @@ pub fn inspect(path: &str) -> Result<MediaInfo, String> {
     if !ffprobe.available {
         return Err(format!("FFprobe unavailable: {}", ffprobe.detail));
     }
-    let mut child = Command::new(&ffprobe.path)
-        .args(["-v", "error", "-show_format", "-show_streams", "-of", "json", "-i"])
-        .arg(&input)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("FFprobe timed out".into());
-            }
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(e.to_string());
-            }
-        }
+    let output = super::process::capture(
+        super::process::command(&ffprobe.path)
+            .args([
+                "-v",
+                "error",
+                "-show_format",
+                "-show_streams",
+                "-of",
+                "json",
+                "-i",
+            ])
+            .arg(&input),
+        Duration::from_secs(20),
+        4 * 1024 * 1024,
+    )?;
+    if output.truncated {
+        return Err("FFprobe metadata exceeds 4 MiB".into());
     }
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).chars().take(500).collect());
+        return Err(String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(500)
+            .collect());
     }
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let streams = json["streams"].as_array().ok_or("FFprobe returned no stream list")?
-        .iter().map(|s| StreamInfo {
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+    let streams = json["streams"]
+        .as_array()
+        .ok_or("FFprobe returned no stream list")?
+        .iter()
+        .map(|s| StreamInfo {
             index: s["index"].as_u64().unwrap_or(0),
             codec_type: s["codec_type"].as_str().unwrap_or("unknown").to_owned(),
             codec_name: s["codec_name"].as_str().map(str::to_owned),
@@ -73,10 +71,13 @@ pub fn inspect(path: &str) -> Result<MediaInfo, String> {
             title: s["tags"]["title"].as_str().map(str::to_owned),
             width: s["width"].as_u64(),
             height: s["height"].as_u64(),
-        }).collect();
+        })
+        .collect();
     Ok(MediaInfo {
         path: input.display().to_string(),
-        duration_seconds: json["format"]["duration"].as_str().and_then(|d| d.parse().ok()),
+        duration_seconds: json["format"]["duration"]
+            .as_str()
+            .and_then(|d| d.parse().ok()),
         format_name: json["format"]["format_name"].as_str().map(str::to_owned),
         streams,
     })
