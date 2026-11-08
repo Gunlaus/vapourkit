@@ -51,6 +51,8 @@ fn encoding_args(options: &EncodeOptions, streams: &[super::metadata::StreamInfo
     args.extend(["-c:a".into(), if options.copy_audio { "copy" } else { "aac" }.into()]);
     if !options.copy_audio { args.extend(["-b:a".into(), "192k".into()]); }
     args.extend(["-c:s".into(), "copy".into(), "-dn".into()]);
+    // MP4 cannot mux many subtitle codecs; fail early rather than producing
+    // a cryptic FFmpeg muxer error. Container checks happen at the call site.
     Ok(args)
 }
 
@@ -98,6 +100,11 @@ pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output
     let (source, destination) = validate(&input, &output)?;
     let media = super::metadata::inspect(&input)?;
     let args = encoding_args(&options, &media.streams)?;
+    let is_mp4 = destination.extension().and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("mp4")).unwrap_or(false);
+    if is_mp4 && !options.subtitle_tracks.is_empty() {
+        return Err("Subtitle stream copy to MP4 is unsupported in this preview; use MKV or deselect subtitles".into());
+    }
     let ffmpeg = super::discovery::discover("ffmpeg")?;
     if !ffmpeg.available { return Err(format!("FFmpeg unavailable: {}", ffmpeg.detail)); }
 
