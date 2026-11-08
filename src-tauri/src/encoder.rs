@@ -4,11 +4,13 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Default)]
 pub struct EncoderState {
     child: Mutex<Option<Arc<Mutex<Child>>>>,
+    cancelled: AtomicBool,
 }
 
 #[derive(Clone, Serialize)]
@@ -53,6 +55,7 @@ pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output
     // Reserve the slot before spawning so simultaneous requests cannot start two jobs.
     let mut slot = state.child.lock().map_err(|e| e.to_string())?;
     if slot.is_some() { return Err("An encode is already running".into()); }
+    state.cancelled.store(false, Ordering::SeqCst);
     let mut command = Command::new(ffmpeg.path);
     command.args(["-hide_banner", "-nostdin", "-n", "-i"])
         .arg(&source)
@@ -74,12 +77,25 @@ pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output
     drop(slot);
     emit(&app, "running", "FFmpeg encoding started", None, None);
 
+    // Drain stderr until EOF, retaining only its tail. A bounded read that stops
+    // draining can fill FFmpeg's stderr pipe and deadlock the encoder.
     let error_reader = std::thread::spawn(move || {
-        use std::io::Read;
-        let mut buf = String::new();
-        let mut reader = stderr.take(64 * 1024);
-        let _ = reader.read_to_string(&mut buf);
-        buf
+        let mut tail = String::new();
+        for line in BufReader::new(stderr).lines() {
+            match line {
+                Ok(line) => {
+                    tail.push_str(&line);
+                    tail.push('\n');
+                    if tail.len() > 8192 {
+                        let mut cut = tail.len() - 4096;
+                        while !tail.is_char_boundary(cut) { cut += 1; }
+                        tail.drain(..cut);
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        tail
     });
     let mut out_time_ms = None;
     let mut speed = None;
@@ -103,7 +119,15 @@ pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output
         }
     };
     let errors = error_reader.join().unwrap_or_default();
+    let cancelled = state.cancelled.swap(false, Ordering::SeqCst);
     *state.child.lock().map_err(|e| e.to_string())? = None;
+    if cancelled {
+        // A cancelled encode may leave an incomplete file. Remove only the
+        // destination validated for this job, never an existing user file.
+        let _ = std::fs::remove_file(&destination);
+        emit(&app, "cancelled", "Encoding cancelled", out_time_ms, speed);
+        return Ok(());
+    }
     match status {
         Ok(exit) if exit.success() => {
             emit(&app, "completed", "Encoding completed", out_time_ms, speed);
@@ -125,6 +149,7 @@ pub fn cancel(state: &EncoderState) -> Result<bool, String> {
     let slot = state.child.lock().map_err(|e| e.to_string())?;
     if let Some(child) = slot.as_ref() {
         child.lock().map_err(|e| e.to_string())?.kill().map_err(|e| e.to_string())?;
+        state.cancelled.store(true, Ordering::SeqCst);
         Ok(true)
     } else {
         Ok(false)
