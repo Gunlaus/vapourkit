@@ -130,9 +130,9 @@ async fn inspect_media(path: String) -> Result<metadata::MediaInfo, String> {
 }
 
 #[tauri::command]
-async fn encode_sample(app: tauri::AppHandle, state: tauri::State<'_, Arc<encoder::EncoderState>>, input: String, output: String) -> Result<(), String> {
+async fn encode_sample(app: tauri::AppHandle, state: tauri::State<'_, Arc<encoder::EncoderState>>, input: String, output: String, options: encoder::EncodeOptions) -> Result<(), String> {
     let state = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || encoder::transcode(app, state, input, output))
+    tauri::async_runtime::spawn_blocking(move || encoder::transcode(app, state, input, output, options))
         .await.map_err(|error| error.to_string())?
 }
 
