@@ -33,10 +33,10 @@ pub fn inspect_script(script: String) -> Result<ScriptCheck, String> {
     let stdout = child.stdout.take().ok_or("No stdout")?;
     let stderr = child.stderr.take().ok_or("No stderr")?;
     let stdout_thread = std::thread::spawn(move || {
-        BufReader::new(stdout).lines().take(256).filter_map(Result::ok).collect::<Vec<_>>().join("\n")
+        BufReader::new(stdout).lines().filter_map(Result::ok).fold(String::new(), |mut s, line| { if s.len() < 4096 { s.push_str(&line); s.push('\n'); } s })
     });
     let stderr_thread = std::thread::spawn(move || {
-        BufReader::new(stderr).lines().take(256).filter_map(Result::ok).collect::<Vec<_>>().join("\n")
+        BufReader::new(stderr).lines().filter_map(Result::ok).fold(String::new(), |mut s, line| { if s.len() < 4096 { s.push_str(&line); s.push('\n'); } s })
     });
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
