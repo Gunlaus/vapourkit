@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncodeOptions {
     pub encoder: String,
@@ -25,7 +25,23 @@ impl Default for EncodeOptions {
     }
 }
 
+pub fn validate_options(options: &EncodeOptions) -> Result<(), String> {
+    let presets: &[&str] = match options.encoder.as_str() {
+        "libx264" | "libx265" => &["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"],
+        "h264_nvenc" | "hevc_nvenc" | "av1_nvenc" => &["p1", "p2", "p3", "p4", "p5", "p6", "p7"],
+        _ => return Err("Unsupported video encoder".into()),
+    };
+    if options.quality > 51 || !presets.contains(&options.preset.as_str()) {
+        return Err("Invalid quality or encoder preset".into());
+    }
+    if options.audio_tracks.len() > 64 || options.subtitle_tracks.len() > 64 {
+        return Err("Too many selected tracks".into());
+    }
+    Ok(())
+}
+
 fn encoding_args(options: &EncodeOptions, streams: &[super::metadata::StreamInfo]) -> Result<Vec<String>, String> {
+    validate_options(options)?;
     let (quality_arg, presets): (&str, &[&str]) = match options.encoder.as_str() {
         "libx264" | "libx265" => ("-crf", &["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]),
         "h264_nvenc" | "hevc_nvenc" | "av1_nvenc" => ("-cq", &["p1", "p2", "p3", "p4", "p5", "p6", "p7"]),
