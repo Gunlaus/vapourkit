@@ -74,7 +74,7 @@ fn candidates(tool: &str, exe: &Path) -> Result<Vec<(PathBuf, &'static str)>, St
 }
 
 fn run_version(path: &Path, tool: &str) -> ToolLocation {
-    let args: &[&str] = if tool == "vspipe" { &["--version"] } else { &["-version"] };
+    let args: &[&str] = if tool == "vspipe" || tool == "python" { &["--version"] } else { &["-version"] };
     let source = if path.components().count() == 1 { "system-path" } else { "vapourkit-data" };
     let mut command = Command::new(path);
     command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
