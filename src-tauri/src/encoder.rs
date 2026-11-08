@@ -94,7 +94,14 @@ pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output
             emit(&app, "running", "Encoding", out_time_ms, speed.clone());
         }
     }
-    let status = child.lock().map_err(|e| e.to_string())?.wait();
+    let status = loop {
+        let result = child.lock().map_err(|e| e.to_string())?.try_wait();
+        match result {
+            Ok(Some(exit)) => break Ok(exit),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(30)),
+            Err(error) => break Err(error),
+        }
+    };
     let errors = error_reader.join().unwrap_or_default();
     *state.child.lock().map_err(|e| e.to_string())? = None;
     match status {
