@@ -3,6 +3,7 @@
 mod discovery;
 mod metadata;
 mod encoder;
+mod settings;
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -140,11 +141,23 @@ fn cancel_sample(state: tauri::State<'_, Arc<encoder::EncoderState>>) -> Result<
     encoder::cancel(state.inner())
 }
 
+#[tauri::command]
+async fn load_native_settings() -> Result<settings::NativeSettings, String> {
+    tauri::async_runtime::spawn_blocking(settings::load)
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn save_native_settings(settings: settings::NativeSettings) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || settings::save(settings))
+        .await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(encoder::EncoderState::default()))
-        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample])
+        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample, load_native_settings, save_native_settings])
         .run(tauri::generate_context!())
         .expect("error while running Vapourkit Tauri host");
 }
