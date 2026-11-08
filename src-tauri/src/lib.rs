@@ -1,6 +1,6 @@
-mod discovery;
-
 //! Native host services. Electron remains the production host until parity.
+
+mod discovery;
 
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
