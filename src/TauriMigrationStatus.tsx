@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 type HostStatus = { host: string; migrationStage: string; platform: string };
-type DependencyProbe = { tool: string; available: boolean; detail: string };
+type DependencyProbe = { tool: string; available: boolean; detail: string; source: string; path: string };
 const tools = ['ffmpeg', 'ffprobe', 'vspipe', 'python'] as const;
 
 export default function TauriMigrationStatus() {
@@ -19,7 +19,7 @@ export default function TauriMigrationStatus() {
     setBusy(true);
     setError('');
     try {
-      const next = await Promise.all(tools.map(tool => invoke<DependencyProbe>('probe_dependency', { tool })));
+      const next = await Promise.all(tools.map(tool => invoke<DependencyProbe>('discover_dependency', { tool })));
       setResults(next);
     } catch (e) {
       setError(String(e));
@@ -43,6 +43,7 @@ export default function TauriMigrationStatus() {
             <li key={result.tool} className="rounded border border-zinc-700 p-4">
               <strong>{result.tool}: {result.available ? 'Available' : 'Unavailable'}</strong>
               <p className="text-zinc-400 break-words">{result.detail}</p>
+              <p className="text-xs text-zinc-500 break-all">{result.source}: {result.path || 'not found'}</p>
             </li>
           ))}
         </ul>
