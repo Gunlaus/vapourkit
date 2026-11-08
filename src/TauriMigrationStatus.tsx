@@ -6,6 +6,9 @@ type HostStatus = { host: string; migrationStage: string; platform: string };
 type DependencyProbe = { tool: string; available: boolean; detail: string; source: string; path: string };
 type MediaInfo = { path: string; durationSeconds: number | null; formatName: string | null; streams: { index: number; codecType: string; codecName: string | null; language: string | null }[] };
 type EncodeEvent = { status: string; detail: string; outTimeMs: number | null; speed: string | null };
+type EncodeOptions = { encoder: string; quality: number; preset: string; audioTracks: number[]; subtitleTracks: number[]; copyAudio: boolean };
+type NativeProfile = { name: string; options: EncodeOptions };
+type VsPreflight = { available: boolean; python: string; version: string; detail: string };
 const tools = ['ffmpeg', 'ffprobe', 'vspipe', 'python'] as const;
 
 export default function TauriMigrationStatus() {
@@ -17,6 +20,9 @@ export default function TauriMigrationStatus() {
   const [output, setOutput] = useState('');
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [encoding, setEncoding] = useState(false);
+  const [profiles, setProfiles] = useState<NativeProfile[]>([]);
+  const [profileName, setProfileName] = useState('');
+  const [vsStatus, setVsStatus] = useState<VsPreflight | null>(null);
   const [encoder, setEncoder] = useState('libx264');
   const [quality, setQuality] = useState(20);
   const [preset, setPreset] = useState('medium');
@@ -46,6 +52,33 @@ export default function TauriMigrationStatus() {
     }).catch(e => { if (active) setError(String(e)); });
     return () => { active = false; stop?.(); };
   }, []);
+
+  async function refreshProfiles() {
+    try { setProfiles(await invoke<NativeProfile[]>('list_native_profiles')); }
+    catch (e) { setError(String(e)); }
+  }
+  useEffect(() => { void refreshProfiles(); }, []);
+  async function saveProfile() {
+    try {
+      await invoke('save_native_profile', { profile: { name: profileName, options: { encoder, quality, preset, audioTracks, subtitleTracks, copyAudio } } });
+      await refreshProfiles();
+    } catch (e) { setError(String(e)); }
+  }
+  async function removeProfile() {
+    try {
+      await invoke('delete_native_profile', { name: profileName });
+      await refreshProfiles();
+    } catch (e) { setError(String(e)); }
+  }
+  function applyProfile(profile: NativeProfile) {
+    setProfileName(profile.name);
+    setEncoder(profile.options.encoder);
+    setQuality(profile.options.quality);
+    setPreset(profile.options.preset);
+    setAudioTracks(profile.options.audioTracks);
+    setSubtitleTracks(profile.options.subtitleTracks);
+    setCopyAudio(profile.options.copyAudio);
+  }
 
   async function inspect() {
     setError('');
@@ -129,6 +162,17 @@ export default function TauriMigrationStatus() {
               <input className="block w-full" type="range" min="0" max="51" value={quality} onChange={e => setQuality(Number(e.target.value))} />
             </label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={copyAudio} onChange={e => setCopyAudio(e.target.checked)} /> Copy selected audio without re-encoding</label>
+          </div>
+          <div className="rounded border border-zinc-700 p-3 space-y-2">
+            <h3 className="font-semibold">Encoding profiles</h3>
+            <div className="flex flex-wrap gap-2">
+              <input aria-label="Profile name" className="bg-zinc-900 border border-zinc-700 rounded p-2" placeholder="Profile_Name" value={profileName} onChange={e => setProfileName(e.target.value)} />
+              <button className="bg-zinc-700 rounded px-3" onClick={() => void saveProfile()}>Save profile</button>
+              <button className="bg-zinc-700 rounded px-3" onClick={() => void removeProfile()}>Delete profile</button>
+            </div>
+            <div className="flex flex-wrap gap-2">{profiles.map(p => <button key={p.name} className="rounded border border-zinc-600 px-3 py-1" onClick={() => applyProfile(p)}>{p.name}</button>)}</div>
+            <button className="bg-zinc-700 rounded px-3 py-2" onClick={() => void invoke<VsPreflight>('vapoursynth_preflight').then(setVsStatus).catch(e => setError(String(e)))}>Check VapourSynth runtime</button>
+            {vsStatus && <p className="text-sm break-words">{vsStatus.available ? 'Available' : 'Unavailable'}: {vsStatus.detail} ({vsStatus.python})</p>}
           </div>
           <div className="flex flex-wrap gap-3">
             <button className="rounded bg-zinc-700 px-4 py-2" onClick={() => void inspect()} disabled={!input || encoding}>Inspect tracks</button>
