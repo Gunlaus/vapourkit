@@ -17,6 +17,22 @@ export default function TauriMigrationStatus() {
   const [output, setOutput] = useState('');
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [encoding, setEncoding] = useState(false);
+  const [encoder, setEncoder] = useState('libx264');
+  const [quality, setQuality] = useState(20);
+  const [preset, setPreset] = useState('medium');
+  const [audioTracks, setAudioTracks] = useState<number[]>([]);
+  const [subtitleTracks, setSubtitleTracks] = useState<number[]>([]);
+  const [copyAudio, setCopyAudio] = useState(false);
+  const nvenc = encoder.endsWith('_nvenc');
+  function chooseEncoder(next: string) {
+    setEncoder(next);
+    setPreset(next.endsWith('_nvenc') ? 'p5' : 'medium');
+  }
+  function toggleTrack(index: number, type: 'audio' | 'subtitle') {
+    const update = (old: number[]) => old.includes(index) ? old.filter(i => i !== index) : [...old, index];
+    if (type === 'audio') setAudioTracks(update);
+    else setSubtitleTracks(update);
+  }
   const [progress, setProgress] = useState<EncodeEvent | null>(null);
 
   useEffect(() => {
@@ -35,7 +51,10 @@ export default function TauriMigrationStatus() {
     setError('');
     setMedia(null);
     try {
-      setMedia(await invoke<MediaInfo>('inspect_media', { path: input }));
+      const info = await invoke<MediaInfo>('inspect_media', { path: input });
+      setMedia(info);
+      setAudioTracks(info.streams.filter(s => s.codecType === 'audio').map(s => s.index));
+      setSubtitleTracks([]);
     } catch (e) { setError(String(e)); }
   }
 
@@ -44,7 +63,7 @@ export default function TauriMigrationStatus() {
     setProgress(null);
     setEncoding(true);
     try {
-      await invoke('encode_sample', { input, output });
+      await invoke('encode_sample', { input, output, options: { encoder, quality, preset, audioTracks, subtitleTracks, copyAudio } });
     } catch (e) { setError(String(e)); }
     finally { setEncoding(false); }
   }
@@ -95,6 +114,22 @@ export default function TauriMigrationStatus() {
           <label className="block">Output video
             <input aria-label="Output video" className="block w-full rounded bg-zinc-900 border border-zinc-700 p-2 mt-1" value={output} onChange={e => setOutput(e.target.value)} placeholder="C:\\Videos\\test-output.mp4" />
           </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label>Video encoder
+              <select className="block w-full bg-zinc-900 border border-zinc-700 p-2" value={encoder} onChange={e => chooseEncoder(e.target.value)}>
+                {['libx264', 'libx265', 'h264_nvenc', 'hevc_nvenc', 'av1_nvenc'].map(v => <option key={v}>{v}</option>)}
+              </select>
+            </label>
+            <label>Preset
+              <select className="block w-full bg-zinc-900 border border-zinc-700 p-2" value={preset} onChange={e => setPreset(e.target.value)}>
+                {(nvenc ? ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'] : ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow']).map(v => <option key={v}>{v}</option>)}
+              </select>
+            </label>
+            <label>Quality ({nvenc ? 'CQ' : 'CRF'}): {quality}
+              <input className="block w-full" type="range" min="0" max="51" value={quality} onChange={e => setQuality(Number(e.target.value))} />
+            </label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={copyAudio} onChange={e => setCopyAudio(e.target.checked)} /> Copy selected audio without re-encoding</label>
+          </div>
           <div className="flex flex-wrap gap-3">
             <button className="rounded bg-zinc-700 px-4 py-2" onClick={() => void inspect()} disabled={!input || encoding}>Inspect tracks</button>
             <button className="rounded bg-indigo-600 px-4 py-2 disabled:opacity-50" onClick={() => void encode()} disabled={!input || !output || encoding}>Start test encode</button>
@@ -102,7 +137,12 @@ export default function TauriMigrationStatus() {
           </div>
           {media && <div className="rounded border border-zinc-700 p-3">
             <p>Format: {media.formatName || 'Unknown'} | Duration: {media.durationSeconds ?? 'Unknown'} seconds</p>
-            <ul>{media.streams.map(stream => <li key={stream.index}>#{stream.index}: {stream.codecType} / {stream.codecName || 'unknown'} {stream.language || ''}</li>)}</ul>
+            <ul className="space-y-1">{media.streams.map(stream => <li key={stream.index}>
+              {stream.codecType === 'audio' || stream.codecType === 'subtitle' ?
+                <label className="flex gap-2 items-center"><input type="checkbox" checked={(stream.codecType === 'audio' ? audioTracks : subtitleTracks).includes(stream.index)} onChange={() => toggleTrack(stream.index, stream.codecType as 'audio' | 'subtitle')} />
+                  #{stream.index}: {stream.codecType} / {stream.codecName || 'unknown'} {stream.language || ''}</label> :
+                <span>#{stream.index}: {stream.codecType} / {stream.codecName || 'unknown'}</span>}
+            </li>)}</ul>
           </div>}
           {progress && <p role="status">{progress.status}: {progress.detail} {progress.outTimeMs !== null ? `| ${(progress.outTimeMs / 1000).toFixed(1)}s` : ''} {progress.speed || ''}</p>}
         </section>
