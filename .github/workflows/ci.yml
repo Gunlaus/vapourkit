@@ -57,3 +57,47 @@ jobs:
           test -n "$appimage"
           test -x "$appimage"
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a timeout --signal=TERM 30s "$appimage" --version
+
+  package-windows:
+    name: Package Windows x64
+    needs: quality
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Build installer and portable archive
+        run: npx electron-builder --win nsis 7z --x64 --publish never
+      - run: npx tsx scripts/renamePortable.ts
+      - name: Verify packages and smoke-test the Windows executable
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          foreach ($file in @("release/Vapourkit-$version-SETUP.exe", "release/Vapourkit-$version-PORTABLE.7z")) {
+            if (!(Test-Path $file) -or (Get-Item $file).Length -eq 0) { throw "Missing package: $file" }
+            Get-FileHash $file -Algorithm SHA256 | Format-List
+          }
+          $app = Start-Process -FilePath "$PWD/release/win-unpacked/Vapourkit.exe" -ArgumentList '--version' -PassThru
+          if (!$app.WaitForExit(30000)) {
+            Stop-Process -Id $app.Id -Force
+            throw 'Packaged Windows executable did not exit within 30 seconds'
+          }
+          if ($app.ExitCode -ne 0) { throw "Packaged Windows executable exited with $($app.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vapourkit-Windows-x64-Installer
+          path: release/*-SETUP.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vapourkit-Windows-x64-Portable
+          path: release/*-PORTABLE.7z
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
