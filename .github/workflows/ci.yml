@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - dev
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,12 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run test:electron
+      - name: Install browser for UI smoke tests
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Test application controls
+        if: runner.os == 'Linux'
+        run: npm run test:ui
 
   package-linux:
     name: Package Linux AppImage

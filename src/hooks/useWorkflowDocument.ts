@@ -58,6 +58,12 @@ interface UseWorkflowDocumentOptions {
  * project's are kept in localStorage too.
  */
 export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog, onItemChange }: UseWorkflowDocumentOptions) {
+  const [ready] = useState(() => {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+  });
+  const whenReady = useCallback(() => ready.promise, [ready]);
   // The item being edited when the app last closed, for App to go back to.
   const [resumeEditingId] = useState(readEditingItemId);
 
@@ -127,6 +133,7 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
     void loadConfigSettings().then(values => {
       configRef.current = { ...values };
       dispatch({ type: 'loaded', values });
+      ready.resolve();
       onLogRef.current('Workflow settings loaded');
     });
   }, [isSetupComplete, dispatch]);
@@ -223,11 +230,12 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
     beginItemRender,
     endItemRender,
     whenConfigSaved,
+    whenReady,
     pendingItemSave,
     forgetResume,
   }), [view, state.project, editingItemId, shownItemId, state.session, state.loaded, state.epoch,
       state.history.past.length, state.history.future.length, resumeEditingId, getState, patch, undo, redo,
-      openItem, showProject, openSession, closeSession, beginItemRender, endItemRender, whenConfigSaved, pendingItemSave,
+      openItem, showProject, openSession, closeSession, beginItemRender, endItemRender, whenConfigSaved, whenReady, pendingItemSave,
       forgetResume]);
 }
 

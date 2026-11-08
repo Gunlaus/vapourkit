@@ -1,0 +1,91 @@
+// UI contract test with a mocked Electron transport. Real media tests are separate.
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
+(async () => {
+const server = spawn(process.execPath, [path.join(path.dirname(require.resolve('vite/package.json')), 'bin/vite.js'), '--host', '127.0.0.1', '--port', '5184', '--strictPort'], {stdio:'pipe'});
+let startup = ''; for (const stream of [server.stdout, server.stderr]) stream.on('data', data => { startup = (startup + data).slice(-4096); });
+let browser;
+try {
+const deadline = Date.now() + 15000;
+while (true) {
+  if (server.exitCode !== null || Date.now() > deadline) throw Error(`Vite failed to start: ${startup}`);
+  try { if ((await fetch('http://127.0.0.1:5184')).ok) break; } catch {}
+  await new Promise(resolve => setTimeout(resolve, 100));
+}
+browser = await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,headless:true});
+const page = await browser.newPage({viewport:{width:1600,height:1100}}); const errors=[];
+page.on('pageerror', e=>errors.push(String(e)));
+await page.addInitScript(() => {
+  const initial={mode:'simple',simple:{codec:'h264',encoder:'nvidia',preset:'p4',quality:21},customArgs:''};
+  const state={encoding:JSON.parse(localStorage.getItem('mockEncoding')||JSON.stringify(initial)), queue:JSON.parse(localStorage.getItem('mockQueue')||'[]'), selectedFiles:[], calls:[], events:{}, preview:true};
+  window.test=state;
+  const handlers={
+    platform:'linux',
+    getInferenceBackendInfo:async()=>({hasCudaSupport:false,backend:'ncnn'}),checkDependencies:async()=>true,getNvencDriverProblem:async()=>null,
+    getAvailableModels:async()=>[],getUninitializedModels:async()=>[],getFilterTemplates:async()=>[{name:'Identity test',code:'clip = clip',category:'Test',description:'Known valid test filter'}],
+    getGpuStats:async()=>null,getDiscordRichPresenceSettings:async()=>({enabled:false}),getDefaultOutputFolder:async()=>({folder:null}),getDescriptiveNamingEnabled:async()=>({enabled:false}),
+    getShowQueue:async()=>({show:false}),setShowQueue:async()=>({success:true}),getQueue:async()=>state.queue,saveQueue:async q=>{state.queue=structuredClone(q);localStorage.setItem('mockQueue',JSON.stringify(q));return{success:true};},saveQueueSync:q=>{state.queue=q;localStorage.setItem('mockQueue',JSON.stringify(q));return{success:true};},
+    getEncodingSettings:async()=>{await new Promise(r=>setTimeout(r,150));return structuredClone(state.encoding);},setEncodingSettings:async e=>{state.encoding=structuredClone(e);localStorage.setItem('mockEncoding',JSON.stringify(e));return{success:true};},
+    getProcessingFormat:async()=>({format:'vs.YUV420P8'}),getOutputFormat:async()=>({format:'mkv'}),getVideoCompareArgs:async()=>({args:'-W'}),getColorimetrySettings:async()=>({overwriteMatrix:false,matrix709:false,defaultMatrix:'709',defaultPrimaries:'709',defaultTransfer:'709'}),
+    getEncodingSettingsExpanded:async()=>({expanded:true}),setEncodingSettingsExpanded:async()=>({success:true}),
+    getUpdateReport:async()=>({report:null}),checkForUpdates:async()=>({success:true,updateAvailable:false}),checkVsMlrtVersion:async()=>({needsNotification:false,storedVersion:'16.1',currentVersion:'16.1',engineCount:0}),
+    setPreviewEnabled:async enabled=>{state.preview=enabled;return{success:true};},previewClose:async()=>({success:true}),
+    getVersion:async()=>({version:'2.1.0'}),checkPluginDependencies:async()=>({installed:true}),
+    selectVideoFile:async()=>state.selectedFiles.shift()??null,
+    getVideoInfo:async path=>({path,name:path.split('/').pop(),size:100,sizeFormatted:'100 B',resolution:'128x96',fps:24,duration:'00:00:01',frameCount:24,tracks:[{index:1,ordinal:0,type:'audio',codec:'aac',language:'eng',isDefault:true,forced:false},{index:2,ordinal:1,type:'audio',codec:'ac3',language:'fra',isDefault:false,forced:false},{index:3,ordinal:0,type:'subtitle',codec:'subrip',language:'eng',isDefault:false,forced:true}]}),
+    getVideoThumbnail:async()=>null,getVideoFrameAt:async()=>null,
+    checkEncodingSupport:async()=>({available:false,category:'driver',message:'Your NVIDIA driver is too old. Update the driver or use CPU encoding.'}),
+    getOutputResolution:async()=>({resolution:'128x96',fps:24}),fileExists:async()=>false,
+    selectTemplateFile:async()=>null,
+  };
+  window.electronAPI=new Proxy(handlers,{get(target,name){if(name in target)return target[name]; if(String(name).startsWith('on'))return callback=>{state.events[name]=callback;return()=>{delete state.events[name];};};return async(...args)=>{state.calls.push({name,args}); if(String(name).startsWith('set')||String(name).startsWith('clear'))return{success:true};throw Error(`Unmocked API ${String(name)}`);};}});
+});
+await page.goto('http://127.0.0.1:5184');
+await page.getByRole('button',{name:'Add filter',exact:true}).waitFor();
+await page.waitForFunction(()=>window.test.encoding.simple.encoder==='nvidia');
+await page.getByText('Your NVIDIA driver is too old. Update the driver or use CPU encoding.',{exact:true}).waitFor();
+await page.getByRole('button',{name:'Use CPU encoding',exact:true}).click();
+await page.waitForFunction(()=>window.test.encoding.simple.encoder==='software');
+assert.equal(await page.getByText('Your NVIDIA driver is too old. Update the driver or use CPU encoding.',{exact:true}).count(),0);
+const filters=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('filters')||'[]'));
+assert.equal((await filters()).length,0);
+for(const choice of ['VS Filter','AI Model']) {
+ await page.getByRole('button',{name:'Add filter',exact:true}).click();
+ await page.getByRole('button',{name:choice,exact:true}).click();
+ await page.keyboard.press('Escape');
+ assert.equal((await filters()).length,0,`Cancelling ${choice} added an empty step`);
+}
+await page.getByRole('button',{name:'Add filter',exact:true}).click();await page.getByRole('button',{name:'VS Filter',exact:true}).click();
+await page.getByText('Identity test',{exact:true}).click();
+await page.waitForFunction(()=>JSON.parse(localStorage.getItem('filters')||'[]').length===1);
+await page.getByTitle('Turn off preview panel',{exact:true}).click();
+await page.waitForFunction(()=>localStorage.getItem('showPreview')==='false'&&!window.test.preview);
+assert.equal(await page.getByRole('region',{name:'Video preview panel'}).count(),0); // rail remains as the restore control
+await page.reload();await page.getByTitle('Turn on preview panel',{exact:true}).waitFor();
+await page.waitForFunction(()=>window.test.preview===false);
+await page.getByTitle('Turn on preview panel',{exact:true}).click();
+await page.getByLabel('Rate control',{exact:true}).selectOption('bitrate');
+await page.getByLabel('Target video bitrate (Mbps)',{exact:true}).fill('10');
+await page.getByLabel('Audio encoding',{exact:true}).selectOption('aac');
+await page.evaluate(()=>window.test.selectedFiles.push(['/videos/one.mkv']));
+await page.getByTitle('Click to browse, or drop files here',{exact:true}).click();
+await page.getByText('Audio tracks (2)',{exact:true}).waitFor();
+const french=page.getByRole('checkbox',{name:/Audio 2: ac3 fra/});await french.uncheck();
+await page.getByRole('button',{name:'Remove all subtitle',exact:true}).click();
+await page.waitForFunction(()=>window.test.encoding.subtitleTracks?.length===0&&window.test.encoding.audioTracks?.join(',')==='0');
+await page.evaluate(()=>window.test.selectedFiles.push(['/videos/two.mkv','/videos/three.mkv']));
+await page.getByTitle('Click to choose a different video',{exact:true}).click();
+await page.waitForFunction(()=>window.test.queue.length===2);
+let queue=await page.evaluate(()=>window.test.queue);
+for(const job of queue){assert.equal(job.workflow.encoding.simple.bitrateMbps,10);assert.equal(job.workflow.encoding.simple.audioCodec,'aac');assert.deepEqual(job.workflow.encoding.audioTracks,[0]);assert.deepEqual(job.workflow.encoding.subtitleTracks,[]);assert.equal(job.workflow.filters.length,1);}
+await page.getByLabel('Target video bitrate (Mbps)',{exact:true}).fill('15');
+await page.getByRole('button',{name:/Apply current settings to all pending/}).click();
+await page.getByRole('button',{name:'Apply to all pending',exact:true}).click();
+await page.waitForFunction(()=>window.test.queue.every(j=>j.workflow.encoding.simple.bitrateMbps===15));
+assert.deepEqual(errors,[]);
+if (process.env.VAPOURKIT_SMOKE_SCREENSHOT) await page.screenshot({path:process.env.VAPOURKIT_SMOKE_SCREENSHOT,fullPage:true});
+console.log('PASS: GPU recovery, both picker cancellations, selected filter commit, preview persistence, guided encoding, source track selection, inherited batch settings and batch apply; no browser exceptions.');
+} finally { await browser?.close(); server.kill(); }
+})().catch(e=>{console.error(e);process.exit(1);});

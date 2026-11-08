@@ -108,3 +108,19 @@ describe('movflags', () => {
     expect(movflagsFor('C:/out.mp4', { videoArgs: ['-c:v', 'libx264', '-movflags', '+frag_keyframe'] })).toEqual([]);
   });
 });
+
+describe('selectable source tracks and preview toggle', () => {
+  it('maps per-type track ordinals and removes all subtitles when requested', () => {
+    const args = build({ ffmpegConfig: { videoArgs: ['-c:v', 'libx264'], audioTracks: [1], subtitleTracks: [] }, previewEnabled: false });
+    expect(args).toContain('1:a:1?');
+    expect(args).not.toContain('1:a?'); expect(args).not.toContain('1:s?');
+    expect(args).not.toContain('pipe:1'); expect(args).not.toContain('image2pipe');
+    expect(args).toContain('C:/out.mp4');
+  });
+  it('keeps the main video without accidentally enabling automatic audio selection', () => {
+    const args = build({ ffmpegConfig: { audioTracks: [], subtitleTracks: [], fastStart: false }, previewEnabled: false });
+    const maps = args.flatMap((value, i) => value === '-map' ? [args[i + 1]] : []);
+    expect(maps).toEqual(['0:v:0']);
+    expect(args).not.toContain('-movflags');
+  });
+});

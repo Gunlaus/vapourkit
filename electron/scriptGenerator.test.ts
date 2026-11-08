@@ -230,6 +230,18 @@ describe('declared vkfilter variables', () => {
     expect(script).toContain('unknown = {{not_declared}}');
   });
 
+  it('rejects invalid declared values with the filter name and escapes string newlines', async () => {
+    const filter = customFilter(0, 'Imported filter', 'amount = {{amount}}');
+    filter.variables = { amount: { type: 'number', default: 1 } };
+    filter.parameters = { amount: 'wrong' };
+    await expect(generate([filter], false)).rejects.toThrow('Imported filter');
+    filter.code = 'label = {{label}}';
+    filter.variables = { label: { type: 'string', default: 'first\nsecond' } };
+    filter.parameters = undefined;
+    const script = await generate([filter], false);
+    expect(script).toContain('label = "first\\nsecond"');
+  });
+
   it('uses a declared variable default when a filter has no saved value', async () => {
     const filter = customFilter(0, 'Crop', 'top = {{crop_top}}');
     filter.variables = { crop_top: { type: 'number', default: 12 } };

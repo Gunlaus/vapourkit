@@ -16,6 +16,7 @@ interface UseVideoProcessingProps {
   segment: SegmentSelection;
   /** Resolves once the settings edited so far are in app-config.json, which the render reads. */
   whenConfigSaved: () => Promise<void>;
+  previewEnabled?: boolean;
 }
 
 export function useVideoProcessing({
@@ -27,6 +28,7 @@ export function useVideoProcessing({
   colorimetry,
   segment,
   whenConfigSaved,
+  previewEnabled = true,
 }: UseVideoProcessingProps) {
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   // A path the user chose. Without one the output is named from the video and
@@ -50,6 +52,9 @@ export function useVideoProcessing({
       { defaultOutputFolder, descriptive: descriptiveNamingEnabled },
     );
   }, [videoInfo, outputPathOverride, outputFormat, colorimetry, filters, segment, defaultOutputFolder, descriptiveNamingEnabled]);
+
+  const previewEnabledRef = useRef(previewEnabled);
+  previewEnabledRef.current = previewEnabled;
 
   // Refs to avoid re-subscribing to the progress listener when these values change
   const isProcessingRef = useRef(isProcessing);
@@ -114,6 +119,7 @@ export function useVideoProcessing({
   // Upscale progress listener - subscribe once and use refs to access current values
   useEffect(() => {
     const unsubscribe = window.electronAPI.onUpscaleProgress((progress: UpscaleProgress) => {
+      if (progress.type === 'preview-frame' && !previewEnabledRef.current) return;
       if (progress.type === 'preview-frame' && progress.previewFrame) {
         // Store the pending frame and schedule update via requestAnimationFrame
         // This decouples the IPC handler from the React render cycle,
@@ -122,7 +128,7 @@ export function useVideoProcessing({
 
         if (rafIdRef.current === null) {
           rafIdRef.current = requestAnimationFrame(() => {
-            if (pendingPreviewFrameRef.current) {
+            if (previewEnabledRef.current && pendingPreviewFrameRef.current) {
               setPreviewFrame(pendingPreviewFrameRef.current);
               pendingPreviewFrameRef.current = null;
             }

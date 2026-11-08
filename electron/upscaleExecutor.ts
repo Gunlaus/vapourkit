@@ -1,3 +1,4 @@
+import { isPreviewEnabled } from './previewSettings';
 // electron/upscaleExecutor.ts
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
@@ -345,7 +346,7 @@ export class UpscaleExecutor {
     if (ffmpegConfig.copyMetadata) logger.upscale('Copying metadata from input');
     const movflags = movflagsFor(outputPath, ffmpegConfig);
     if (movflags.length > 0) logger.upscale(`Adding movflags: ${movflags.join(',')}`);
-    return buildPipeFFmpegArgs({ inputPath, outputPath, metadata, outputInfo, ffmpegConfig, audioTrim });
+    return buildPipeFFmpegArgs({ inputPath, outputPath, metadata, outputInfo, ffmpegConfig, audioTrim, previewEnabled: isPreviewEnabled() });
   }
 
   private spawnFFmpeg(ffmpegArgs: string[]) {
@@ -417,6 +418,7 @@ export class UpscaleExecutor {
     // Capture preview frames from ffmpeg stdout
     if (ffmpeg.stdout) {
       ffmpeg.stdout.on('data', (data: Buffer) => {
+        if (!isPreviewEnabled()) { previewFrameBuffer = Buffer.alloc(0); return; }
         // Prevent memory overflow: if buffer is too large, drop incoming data
         if (previewFrameBuffer.length > MAX_PREVIEW_BUFFER_SIZE) {
           logger.warn(`Preview buffer overflow (${previewFrameBuffer.length} bytes), dropping frames`);
@@ -450,6 +452,7 @@ export class UpscaleExecutor {
             // Use setImmediate to defer base64 encoding and IPC send,
             // preventing GUI blocking during video processing
             setImmediate(() => {
+              if (!isPreviewEnabled()) { isProcessingPreview = false; return; }
               const base64Frame = frameData.toString('base64');
               
               // Send preview frame asynchronously

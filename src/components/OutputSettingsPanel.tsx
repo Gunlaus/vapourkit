@@ -1,3 +1,5 @@
+import { EncodingSupportPanel } from './EncodingSupportPanel';
+import { GuidedEncodingControls } from './GuidedEncodingControls';
 // OutputSettingsPanel.tsx
 import { memo, useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Sliders, Gauge } from 'lucide-react';
@@ -99,6 +101,7 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
   const handleCodecChange = (codec: SimpleCodec) => {
     // ProRes only supports YUV422P10 and YUV444P10 - auto-select if current format is incompatible
     if (codec === 'prores') {
+      if (!['mov', 'mkv'].includes(outputFormat)) onFormatChange('mov');
       const proresCompatibleFormats = ['vs.YUV422P10', 'vs.YUV444P10'];
       if (!proresCompatibleFormats.includes(processingFormat)) {
         onProcessingFormatChange('vs.YUV422P10');
@@ -396,7 +399,7 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
             )}
 
             {/* CRF Quality (not for ProRes) */}
-            {supportsCrf(config.codec) && (
+            {supportsCrf(config.codec) && config.rateControl !== 'bitrate' && (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[10px] font-display font-semibold uppercase tracking-[0.09em] text-ink-500">
@@ -418,10 +421,11 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
                 <div className="flex justify-between text-[10.5px] text-ink-500 mt-1">
                   <span>Best ({crfRange.min})</span>
                   <span>Default ({crfRange.default})</span>
-                  <span>Fast ({crfRange.max})</span>
+                  <span>Smaller file ({crfRange.max})</span>
                 </div>
               </div>
             )}
+            <GuidedEncodingControls value={config} onChange={handleSimpleChange} onProcessingFormatChange={onProcessingFormatChange} outputFormat={outputFormat} disabled={isProcessing} />
           </>
         )}
 
@@ -469,6 +473,7 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
         </div>
       </div>
       )}
+      {!benchmarkMode && <div className="px-3 pb-3"><EncodingSupportPanel encoding={encoding} processingFormat={processingFormat} disabled={isProcessing} onChange={onEncodingChange} onProcessingFormatChange={onProcessingFormatChange} /></div>}
     </Section>
   );
 });

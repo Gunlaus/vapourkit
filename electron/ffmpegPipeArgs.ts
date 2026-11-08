@@ -31,6 +31,7 @@ export interface PipeArgsInput {
   /** How the source's audio and subtitles are cut to line up with the output video. */
   audioTrim: AudioTrim;
   benchmarkMode?: boolean;
+  previewEnabled?: boolean;
 }
 
 /**
@@ -69,10 +70,14 @@ export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
   // Main output: video from the pipe, audio and subtitles from the source
   ffmpegArgs.push('-map', '0:v:0');
   if (metadata.hasAudio) {
-    ffmpegArgs.push('-map', '1:a?', '-c:a', 'copy');
+    if (ffmpegConfig.audioTracks === undefined) ffmpegArgs.push('-map', '1:a?');
+    else for (const index of ffmpegConfig.audioTracks) ffmpegArgs.push('-map', `1:a:${index}?`);
+    ffmpegArgs.push('-c:a', 'copy');
   }
   if (metadata.hasSubtitles) {
-    ffmpegArgs.push('-map', '1:s?', '-c:s', 'copy');
+    if (ffmpegConfig.subtitleTracks === undefined) ffmpegArgs.push('-map', '1:s?');
+    else for (const index of ffmpegConfig.subtitleTracks) ffmpegArgs.push('-map', `1:s:${index}?`);
+    ffmpegArgs.push('-c:s', 'copy');
   }
 
   if (ffmpegConfig.videoArgs) {
@@ -100,6 +105,8 @@ export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
 
   ffmpegArgs.push('-y', outputPath);
 
+  if (input.previewEnabled === false) return ffmpegArgs;
+
   // Preview output: JPEG frames to stdout
   ffmpegArgs.push('-map', '0:v:0');
   ffmpegArgs.push('-vf', 'fps=1,scale=-2:720'); // 1 fps preview, max height 720p
@@ -115,7 +122,7 @@ export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
 /** The movflags for the main output. */
 export function movflagsFor(outputPath: string, ffmpegConfig: Partial<FFmpegConfig>): string[] {
   const movflags = [...(ffmpegConfig.movflags ?? [])];
-  if (MOV_FAMILY.has(path.extname(outputPath).toLowerCase()) && !ffmpegConfig.videoArgs?.includes('-movflags')
+  if (ffmpegConfig.fastStart !== false && MOV_FAMILY.has(path.extname(outputPath).toLowerCase()) && !ffmpegConfig.videoArgs?.includes('-movflags')
     && !movflags.includes('+faststart')) {
     movflags.push('+faststart');
   }

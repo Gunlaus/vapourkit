@@ -1,3 +1,4 @@
+import { formatVapourSynthValidationError } from './vapourSynthErrorFormatter';
 // electron/previewSession.ts — the Node half of the warm preview session.
 //
 // Owns one long-lived python child running data/config/preview_server.py, and
@@ -439,7 +440,7 @@ export class PreviewSession {
     this.pending.delete(seq);
 
     if (reply.header.type === 'error') {
-      waiter.reject(new Error(String(reply.header.error ?? 'Unknown preview error')));
+      waiter.reject(new Error(formatVapourSynthValidationError(String(reply.header.error ?? 'Unknown preview error'))));
       return;
     }
     waiter.resolve(reply);
@@ -486,7 +487,7 @@ export class PreviewSession {
         type: 'error',
         stream,
         n: header.n ?? -1,
-        error: String(header.error ?? 'Unknown playback error'),
+        error: formatVapourSynthValidationError(String(header.error ?? 'Unknown playback error')),
       });
     }
     return true;

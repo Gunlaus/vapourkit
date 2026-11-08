@@ -181,3 +181,26 @@ describe('splitArgs', () => {
     expect(splitArgs("-vf scale='min(1280,iw)':-2")).toEqual(['-vf', "scale='min(1280,iw)':-2"]);
   });
 });
+
+describe('guided encoding controls and track persistence', () => {
+  it('uses target bitrate without simultaneously emitting constant quality', () => {
+    const args = simpleArgsOf({ ...DEFAULT_ENCODING.simple, encoder: 'nvidia', preset: 'p4', rateControl: 'bitrate', bitrateMbps: 12, maxBitrateMbps: 16 });
+    expect(args).toContain('-rc vbr -b:v 12M');
+    expect(args).toContain('-maxrate 16M -bufsize 32M');
+    expect(args).not.toMatch(/-cq|-crf|-b:v 0/);
+  });
+  it('resolves novice audio, keyframes, tuning and metadata controls', () => {
+    const args = simpleArgsOf({ ...DEFAULT_ENCODING.simple, audioCodec: 'aac', audioBitrateKbps: 256, audioChannels: 2, keyframeInterval: 48, threads: 4, tune: 'film', copyMetadata: false });
+    expect(args).toContain('-c:a aac -b:a 256k -ac 2');
+    expect(args).toContain('-g 48 -threads:v 4 -tune film');
+    expect(args).toContain('-map_metadata -1');
+    expect(simpleArgsOf({ ...DEFAULT_ENCODING.simple, audioCodec: 'none' })).toContain('-an');
+  });
+  it('normalizes new settings and retains explicit remove-all track choices', () => {
+    const encoding = normalizeEncodingSettings({ ...DEFAULT_ENCODING, simple: { ...DEFAULT_ENCODING.simple, rateControl: 'bitrate', bitrateMbps: -5, maxBitrateMbps: 0.01, threads: 999, proresProfile: 99 }, audioTracks: [], subtitleTracks: [2, 0, 2] })!;
+    expect(encoding.simple).toMatchObject({ bitrateMbps: 0.1, maxBitrateMbps: 0.1, threads: 256, proresProfile: 5 });
+    expect(encoding.audioTracks).toEqual([]); expect(encoding.subtitleTracks).toEqual([0, 2]);
+    expect(encodingFrom(encoding, resolveEncodingArgs(encoding))?.audioTracks).toEqual([]);
+    expect(normalizeEncodingSettings({ ...DEFAULT_ENCODING, audioTracks: ['bad'] })).toBeNull();
+  });
+});

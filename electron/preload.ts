@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Dependency management
   platform: process.platform,
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+  checkEncodingSupport: (request: { encoder: string; pixelFormat: string }) => ipcRenderer.invoke('check-encoding-support', request),
   getNvencDriverProblem: () => ipcRenderer.invoke('get-nvenc-driver-problem'),
   detectCudaSupport: () => ipcRenderer.invoke('detect-cuda-support'),
   getInferenceBackendInfo: () => ipcRenderer.invoke('get-inference-backend-info'),
@@ -15,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('setup-progress', listener);
     return () => ipcRenderer.removeListener('setup-progress', listener);
   },
+
+  setPreviewEnabled: (enabled: boolean) => ipcRenderer.invoke('set-preview-enabled', enabled),
 
   // Video operations
   selectVideoFile: () => ipcRenderer.invoke('select-video-file'),

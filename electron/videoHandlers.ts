@@ -1,3 +1,5 @@
+import { nvencEncoderOf, checkNvencEncoder } from './encodingSupport';
+import { setPreviewEnabled } from './previewSettings';
 import { ipcMain, BrowserWindow, shell, MessageChannelMain, type MessagePortMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -161,6 +163,8 @@ export function registerVideoHandlers(
    * app's build banner. A cancel, or a newer evaluation, kills it, and the
    * result then carries the error that left.
    */
+  handleValidated('set-preview-enabled', z.boolean(), async enabled => { setPreviewEnabled(enabled); return { success: true }; });
+
   const evaluateScript = async (scriptPath: string): Promise<OutputInfo> => {
     const vspipePath = dependencyManager.getVSPipePath();
     const extractor = new VapourSynthInfoExtractor(
@@ -214,7 +218,8 @@ export function registerVideoHandlers(
         scanType: metadata.scanType,
         colorSpace: metadata.colorSpace,
         duration: metadata.duration,
-        frameCount: frameCount
+        frameCount: frameCount,
+        tracks: metadata.tracks,
       };
 
       logger.info(`Video info: ${info.name}, ${info.sizeFormatted}, ${metadata.resolution || 'unknown resolution'}, ${metadata.fps ? metadata.fps + ' fps' : 'unknown fps'}, ${metadata.pixelFormat || 'unknown format'}${frameCount ? `, ${frameCount} frames` : ''}`);
@@ -388,6 +393,15 @@ export function registerVideoHandlers(
       }
       
       try {
+        // Check encoding before expensive inference/engine builds, not only after a broken pipe.
+        const nvenc = nvencEncoderOf(configManager.getFfmpegArgs());
+        if (nvenc && !benchmarkMode) {
+          const ffmpeg = FFmpegManager.getFFmpegPath();
+          if (!ffmpeg) throw new Error('FFmpeg is missing. Repair it using Start Setup in Settings.');
+          const support = await checkNvencEncoder(ffmpeg, nvenc, configManager.getProcessingFormat(), () => executor.isStopped);
+          if (!support.available) throw new Error(support.message);
+        }
+        if (executor.isStopped) throw new Error('Canceled');
         // Generate VapourSynth script
         qlog('Generating VapourSynth script');
         

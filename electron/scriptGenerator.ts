@@ -162,9 +162,12 @@ export class VapourSynthScriptGenerator {
       if (!declaration) return match;
 
       const value = filter.parameters?.[key] ?? declaration.default;
+      if (value === undefined || (declaration.type && typeof value !== declaration.type) || (typeof value === 'number' && !Number.isFinite(value))) {
+        throw new Error(`Filter "${filter.preset || filter.id}": variable "${key}" needs a valid ${declaration.type || 'number, string or boolean'} value. Edit the filter parameters or correct its [variables.${key}] declaration and re-import it.`);
+      }
       if (typeof value === 'number') return Number.isFinite(value) ? String(value) : match;
       if (typeof value === 'boolean') return value ? 'True' : 'False';
-      if (typeof value === 'string') return pyString(value);
+      if (typeof value === 'string') return JSON.stringify(value);
       return match;
     });
   }

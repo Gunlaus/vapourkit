@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { QueueItem } from '../electron.d';
-import { newQueueItems, uniqueOutputPath, withItemWorkflow, type OutputNaming, type QueueEntry } from '../utils/queueOutputPath';
+import { newQueueItems, uniqueOutputPath, withItemWorkflow, withPendingWorkflows, type OutputNaming, type QueueEntry } from '../utils/queueOutputPath';
 import { migrateQueueWorkflow } from '../utils/workflowSettings';
 import { queueSaveDelay, queueShape } from '../utils/queueSaveTiming';
 import { queueRunFlags, type QueueRunStatus } from '../utils/queueRun';
@@ -173,6 +173,10 @@ export function useQueueStore({ onLog, naming }: UseQueueStoreProps) {
     setQueue(prev => withItemWorkflow(prev, itemId, workflow, { defaultOutputFolder, descriptive }));
   }, [defaultOutputFolder, descriptive]);
 
+  const applyToPending = useCallback((workflow: QueueItem['workflow']) => {
+    setQueue(prev => withPendingWorkflows(prev, workflow, { defaultOutputFolder, descriptive }));
+  }, [defaultOutputFolder, descriptive]);
+
   /**
    * Write the queue now, synchronously, with the edited item's latest
    * settings folded in (an edit committed as the window closes has not
@@ -272,6 +276,7 @@ export function useQueueStore({ onLog, naming }: UseQueueStoreProps) {
     removeFromQueue,
     updateQueueItem,
     updateItemWorkflow,
+    applyToPending,
     flushQueue,
     clearQueue,
     clearCompletedItems,
