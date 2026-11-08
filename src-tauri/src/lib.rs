@@ -4,6 +4,8 @@ mod discovery;
 mod metadata;
 mod encoder;
 mod settings;
+mod profiles;
+mod vapoursynth;
 
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -153,11 +155,31 @@ async fn save_native_settings(settings: settings::NativeSettings) -> Result<(), 
         .await.map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn list_native_profiles() -> Result<Vec<profiles::Profile>, String> {
+    tauri::async_runtime::spawn_blocking(profiles::list).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn save_native_profile(profile: profiles::Profile) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || profiles::save(profile)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn delete_native_profile(name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || profiles::delete(&name)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn vapoursynth_preflight() -> Result<vapoursynth::Preflight, String> {
+    tauri::async_runtime::spawn_blocking(vapoursynth::check).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(encoder::EncoderState::default()))
-        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample, load_native_settings, save_native_settings])
+        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media, encode_sample, cancel_sample, load_native_settings, save_native_settings, list_native_profiles, save_native_profile, delete_native_profile, vapoursynth_preflight])
         .run(tauri::generate_context!())
         .expect("error while running Vapourkit Tauri host");
 }
