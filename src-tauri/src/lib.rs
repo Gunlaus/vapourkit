@@ -1,6 +1,7 @@
 //! Native host services. Electron remains the production host until parity.
 
 mod discovery;
+mod metadata;
 
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -118,10 +119,17 @@ async fn discover_dependency(tool: String) -> Result<discovery::ToolLocation, St
         .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn inspect_media(path: String) -> Result<metadata::MediaInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || metadata::inspect(&path))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency])
+        .invoke_handler(tauri::generate_handler![host_status, probe_dependency, discover_dependency, inspect_media])
         .run(tauri::generate_context!())
         .expect("error while running Vapourkit Tauri host");
 }
