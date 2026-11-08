@@ -1,11 +1,58 @@
 //! Experimental single-job FFmpeg transcode service. Does not run VapourSynth filters.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncodeOptions {
+    pub encoder: String,
+    pub quality: u8,
+    pub preset: String,
+    pub audio_tracks: Vec<u64>,
+    pub subtitle_tracks: Vec<u64>,
+    pub copy_audio: bool,
+}
+
+impl Default for EncodeOptions {
+    fn default() -> Self {
+        Self { encoder: "libx264".into(), quality: 20, preset: "medium".into(),
+            audio_tracks: Vec::new(), subtitle_tracks: Vec::new(), copy_audio: false }
+    }
+}
+
+fn encoding_args(options: &EncodeOptions, streams: &[super::metadata::StreamInfo]) -> Result<Vec<String>, String> {
+    let (quality_arg, presets): (&str, &[&str]) = match options.encoder.as_str() {
+        "libx264" | "libx265" => ("-crf", &["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]),
+        "h264_nvenc" | "hevc_nvenc" | "av1_nvenc" => ("-cq", &["p1", "p2", "p3", "p4", "p5", "p6", "p7"]),
+        _ => return Err("Unsupported video encoder".into()),
+    };
+    if options.quality > 51 || !presets.contains(&options.preset.as_str()) {
+        return Err("Invalid quality or encoder preset".into());
+    }
+    let mut args = vec!["-map".into(), "0:v:0".into()];
+    for (tracks, kind) in [(&options.audio_tracks, "audio"), (&options.subtitle_tracks, "subtitle")] {
+        for &index in tracks {
+            if !streams.iter().any(|s| s.index == index && s.codec_type == kind) {
+                return Err(format!("Invalid {kind} stream index {index}"));
+            }
+            args.extend(["-map".into(), format!("0:{index}")]);
+        }
+    }
+    args.extend(["-c:v".into(), options.encoder.clone(), "-preset".into(), options.preset.clone(),
+        quality_arg.into(), options.quality.to_string()]);
+    if options.encoder.ends_with("_nvenc") {
+        args.extend(["-rc".into(), "vbr".into(), "-b:v".into(), "0".into()]);
+    }
+    args.extend(["-c:a".into(), if options.copy_audio { "copy" } else { "aac" }.into()]);
+    if !options.copy_audio { args.extend(["-b:a".into(), "192k".into()]); }
+    args.extend(["-c:s".into(), "copy".into(), "-dn".into()]);
+    Ok(args)
+}
 
 #[derive(Default)]
 pub struct EncoderState {
@@ -47,8 +94,10 @@ fn validate(input: &str, output: &str) -> Result<(PathBuf, PathBuf), String> {
     Ok((source, destination))
 }
 
-pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output: String) -> Result<(), String> {
+pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output: String, options: EncodeOptions) -> Result<(), String> {
     let (source, destination) = validate(&input, &output)?;
+    let media = super::metadata::inspect(&input)?;
+    let args = encoding_args(&options, &media.streams)?;
     let ffmpeg = super::discovery::discover("ffmpeg")?;
     if !ffmpeg.available { return Err(format!("FFmpeg unavailable: {}", ffmpeg.detail)); }
 
@@ -59,9 +108,8 @@ pub fn transcode(app: AppHandle, state: Arc<EncoderState>, input: String, output
     let mut command = Command::new(ffmpeg.path);
     command.args(["-hide_banner", "-nostdin", "-n", "-i"])
         .arg(&source)
-        .args(["-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264",
-            "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "192k",
-            "-sn", "-dn", "-progress", "pipe:1", "-nostats"])
+        .args(args)
+        .args(["-progress", "pipe:1", "-nostats"])
         .arg(&destination)
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
@@ -159,6 +207,23 @@ pub fn cancel(state: &EncoderState) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_unknown_encoders() {
+        let mut options = EncodeOptions::default();
+        options.encoder = "arbitrary_command".into();
+        assert!(encoding_args(&options, &[]).is_err());
+    }
+    #[test]
+    fn rejects_invalid_track_selection() {
+        let mut options = EncodeOptions::default();
+        options.audio_tracks.push(100);
+        assert!(encoding_args(&options, &[]).is_err());
+    }
+    #[test]
+    fn allows_nvenc_preset() {
+        let options = EncodeOptions { encoder: "hevc_nvenc".into(), preset: "p5".into(), ..Default::default() };
+        assert!(encoding_args(&options, &[]).unwrap().contains(&"hevc_nvenc".to_string()));
+    }
     #[test]
     fn rejects_nonexistent_input() {
         assert!(validate("missing-video-27b8.mkv", "output.mkv").is_err());
