@@ -20,7 +20,8 @@ builder, source, target = sys.argv[1:]
 assert str(pathlib.Path(builder).parent) not in sys.path, sys.path
 scope = runpy.run_path(builder)
 import vk_model_runtime as runtime
-assert pathlib.Path(runtime.__file__).parent == pathlib.Path(builder).parent
+# Windows may expand RUNNER~1 to its long path during bootstrap. Compare files.
+assert pathlib.Path(runtime.__file__).samefile(pathlib.Path(builder).with_name('vk_model_runtime.py'))
 runtime.runtime_identity = lambda: {'gpu': 'test', 'tensorrt': 'test'}
 assert 'fp16' in str(scope['blacklist_path_for']({'save_engine': target}, 'graph', 'fp16'))
 sys.modules['tensorrt'] = types.ModuleType('tensorrt')
