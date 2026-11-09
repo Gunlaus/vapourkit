@@ -40,6 +40,8 @@ export async function ensureEngineBuilderScript(): Promise<string> {
     await fs.ensureDir(PATHS.APP_DATA);
     await fs.writeFile(builderScript, bundled);
   }
+  const helper = 'vk_model_runtime.py';
+  await fs.copy(path.join(getBundledBasePath(), 'include', helper), path.join(PATHS.APP_DATA, helper), { overwrite: true });
   return builderScript;
 }
 

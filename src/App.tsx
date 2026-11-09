@@ -13,7 +13,7 @@ import { ConsoleDrawer } from './components/ConsoleDrawer';
 import { Scrubber } from './components/Scrubber';
 import { EngineBuildBanner } from './components/EngineBuildBanner';
 import type { BackendId, ColorimetrySettings, EncodingSettings, EngineBuildStatus, UpdateInfo, SegmentSelection, VsMlrtVersionInfo, Filter, FilterParameterValues } from './electron';
-import { getBackendDescriptor, normalizeBackendForCurrentPlatform, resolveFilterBackend } from './utils/backends';
+import { getBackendDescriptor, normalizeBackendForCurrentPlatform } from './utils/backends';
 import { AppRail } from './components/AppRail';
 import { TitleStrip } from './components/TitleStrip';
 import { ModelBuildNotification } from './components/ModelBuildNotification';
@@ -954,17 +954,7 @@ function App() {
     if (!videoInfo) return true;
     if (!benchmarkMode && !outputPath) return true;
     
-    // Prevent processing when a filter's effective backend needs a built
-    // engine but the filter still points at a raw ONNX model
-    const hasUnbuiltModel = filters.some(f =>
-      f.enabled &&
-      f.filterType === 'aiModel' &&
-      f.modelPath &&
-      f.modelPath.toLowerCase().endsWith('.onnx') &&
-      getBackendDescriptor(resolveFilterBackend(f.backend, defaultBackend)).requiresEngineBuild
-    );
-    if (hasUnbuiltModel) return true;
-    
+    // TensorRT models are prepared and validated at their actual workflow stage.
     // Allow processing without AI model as long as there's at least one enabled filter or no filters at all
     // Allow if there are no filters (pure processing)
     if (filters.length === 0) return false;

@@ -19,6 +19,7 @@ export interface ImportForm {
   useCustomTrtexecParams: boolean;
   customTrtexecParams: string;
   skipValidation: boolean;
+  prepareOnUse?: boolean;
   detectionFailed: boolean;
 }
 
@@ -63,6 +64,7 @@ const DEFAULT_IMPORT_FORM: ImportForm = {
   useCustomTrtexecParams: true, // Always true in refactored UI - the textbox is the main interface
   customTrtexecParams: generateTrtexecCommand('image', false, false, 'input', false),
   skipValidation: false,
+  prepareOnUse: true,
   detectionFailed: false
 };
 
@@ -119,7 +121,8 @@ export const useModelImport = (
           if (!validation.isValid) {
             detectionFailed = true;
           }
-          if (validation.isValid && validation.inputName) {
+          if (validation.compatibilityError) { notify.error('Unsupported model layout', validation.compatibilityError); return; }
+      if (validation.isValid && validation.inputName) {
             extractedInputName = validation.inputName;
             addConsoleLog(`[Model] Detected input name: ${extractedInputName}`);
           }
@@ -340,6 +343,7 @@ export const useModelImport = (
           useCustomTrtexecParams: importForm.useCustomTrtexecParams,
           customTrtexecParams: importForm.customTrtexecParams || undefined,
           skipValidation: importForm.skipValidation,
+          deferBuild: importForm.prepareOnUse !== false,
         });
       }
     } catch (error) {
@@ -366,7 +370,7 @@ export const useModelImport = (
 
   const handleAutoBuildModel = useCallback(async (model: { onnxPath: string; name: string; modelType?: string; displayTag?: string }): Promise<void> => {
     // Use existing metadata from ONNX model if available
-    const modelType = model.modelType || 'image';
+    let modelType = model.modelType || 'image';
     const displayTag = model.displayTag || '';
     
     // Extract input name and detect properties from the model
@@ -378,6 +382,7 @@ export const useModelImport = (
     let useBf16 = false;
     try {
       const validation = await window.electronAPI.validateOnnxModel(model.onnxPath);
+      if (validation.compatibilityError) { notify.error('Unsupported model layout', validation.compatibilityError); return; }
       if (validation.isValid && validation.inputName) {
         inputName = validation.inputName;
       }
@@ -387,6 +392,7 @@ export const useModelImport = (
         detectedShape = validation.inputShape;
         addConsoleLog(`[Auto-Build] Detected static model with shape: ${detectedShape.join('x')}`);
       }
+      if (validation.contract) modelType = validation.contract.temporalFrames > 1 ? 'vsr' : 'image';
       // Auto-detect temporal frames from channel count
       if (validation.isValid && validation.inputShape && validation.inputShape.length >= 4) {
         const inputChannels = validation.inputShape[1];

@@ -113,6 +113,7 @@ def parse_args(argv):
         'timing_cache_file': None,
         'workspace_mib': None,
         'device': None,
+        'adapter': None,
     }
 
     for raw in argv:
@@ -125,7 +126,10 @@ def parse_args(argv):
         key, _, value = arg[2:].partition('=')
         value = strip_quotes(value)
 
-        if key == 'onnx':
+        if key == 'vkAdapter':
+            if value != 'rgb-window-v1': raise ValueError('Unknown Vapourkit model adapter')
+            opts['adapter'] = value
+        elif key == 'onnx':
             opts['onnx'] = value
         elif key == 'saveEngine':
             opts['save_engine'] = value
@@ -461,7 +465,9 @@ def blacklist_path_for(opts, fingerprint, precision):
     cache because the key is its structure fingerprint, not its model name.
     """
     cache_dir = Path(opts['save_engine']).parent / '.vapourkit-trt-blacklists'
-    return cache_dir / f'{fingerprint}_{precision}.txt'
+    from vk_model_runtime import runtime_identity
+    runtime_key = hashlib.sha256(json.dumps(runtime_identity(), sort_keys=True).encode()).hexdigest()[:16]
+    return cache_dir / f'{fingerprint}_{precision}_{runtime_key}.txt'
 
 
 def _source_low_precision_types(model):
@@ -1543,9 +1549,9 @@ def build_low_precision_engine(opts, trt):
         + '\n'.join(sorted(blacklisted_nodes))
         + '\n'
     )
-    atomic_write_bytes(cached_blacklist_path, blacklist_text.encode('utf-8'))
+    opts['_pending_blacklist'] = (str(cached_blacklist_path), blacklist_text.encode('utf-8'))
     print(
-        f'Saved learned {precision.upper()} TensorRT blacklist with '
+        f'Prepared learned {precision.upper()} TensorRT blacklist with '
         f'{len(blacklisted_nodes)} node(s): {cached_blacklist_path}',
         flush=True,
     )
@@ -1610,6 +1616,10 @@ def build_direct_engine(opts, trt, legacy_precision_flags):
 def build(opts):
     import tensorrt as trt
 
+    if opts.get('adapter') == 'rgb-window-v1' and not (opts['fp16'] or opts['bf16']):
+        from vk_model_runtime import graph_contract
+        if any(t in (10, 16) for t in graph_contract(opts['onnx']).get('weightTypes', [])):
+            raise RuntimeError('This export already contains low-precision tensors. Select the matching precision or import an original FP32 export for FP32 execution.')
     legacy_precision_flags = hasattr(trt.BuilderFlag, 'FP16')
     # TensorRT 11's strongly typed path needs graph conversion for requested
     # reduced precision. It also deliberately probes already typed FP16/BF16
@@ -1651,7 +1661,46 @@ def main(argv):
     label = os.path.splitext(os.path.basename(opts['onnx']))[0]
     print(f'[vk-build] begin Building TensorRT engine: {label}', flush=True)
     try:
-        return build(opts)
+        target = opts['save_engine']
+        candidate = target + '.candidate-' + str(os.getpid())
+        opts['save_engine'] = candidate
+        try:
+            status = build(opts)
+            if status: return status
+            import gc
+            gc.collect()
+            from vk_model_runtime import validate_engine
+            report_status('Validating engine through VapourSynth inference...')
+            manifest = validate_engine(candidate, opts)
+            # The working engine remains untouched until real frame inference passes.
+            metadata_candidate = candidate + '.json'
+            atomic_write_bytes(metadata_candidate, json.dumps(manifest, indent=2).encode())
+            import shutil
+            backup = candidate + '.previous'
+            backup_metadata = backup + '.json'
+            had_engine, had_metadata = os.path.exists(target), os.path.exists(target + '.json')
+            if had_engine: shutil.copyfile(target, backup)
+            if had_metadata: shutil.copyfile(target + '.json', backup_metadata)
+            try:
+                os.replace(candidate, target)
+                os.replace(metadata_candidate, target + '.json')
+            except BaseException:
+                if had_engine: os.replace(backup, target)
+                elif os.path.exists(target): os.remove(target)
+                if had_metadata: os.replace(backup_metadata, target + '.json')
+                elif os.path.exists(target + '.json'): os.remove(target + '.json')
+                raise
+            finally:
+                for file in (backup, backup_metadata):
+                    if os.path.exists(file): os.remove(file)
+            if opts.get('_pending_blacklist'):
+                file, content = opts['_pending_blacklist']
+                try: atomic_write_bytes(file, content)
+                except OSError as error: print('Warning: could not save precision cache: ' + str(error), file=sys.stderr)
+            return 0
+        finally:
+            for file in (candidate, candidate + '.json'):
+                if os.path.exists(file): os.remove(file)
     except Exception as error:
         print(f'Error: TensorRT engine build failed: {error}', file=sys.stderr)
         return 1

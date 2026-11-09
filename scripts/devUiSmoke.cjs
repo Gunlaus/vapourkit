@@ -23,6 +23,8 @@ await page.addInitScript(() => {
   window.test=state;
   const handlers={
     platform:'linux',
+    checkComponents:async()=>({catalog:{schema:1,client:1,revision:1,components:[{id:'test-model',version:'1',name:'Catalog test model',channel:'experimental',notes:'CPU tested; GPU pending.',license:'MIT',files:[{bytes:1000}]}]},installed:state.componentInstalled?{'test-model':'1'}:{},pendingRestart:false}),
+    installComponent:async(id,version,experimental)=>{if(!experimental)throw Error('Experimental opt-in required');state.componentInstalled=true;return{restart:false,message:'Model installed alongside existing versions.'};},
     getInferenceBackendInfo:async()=>({hasCudaSupport:false,backend:'ncnn'}),checkDependencies:async()=>true,getNvencDriverProblem:async()=>null,
     getAvailableModels:async()=>[],getUninitializedModels:async()=>[],getFilterTemplates:async()=>[{name:'Identity test',code:'clip = clip',category:'Test',description:'Known valid test filter'}],
     getGpuStats:async()=>null,getDiscordRichPresenceSettings:async()=>({enabled:false}),getDefaultOutputFolder:async()=>({folder:null}),getDescriptiveNamingEnabled:async()=>({enabled:false}),
@@ -30,7 +32,7 @@ await page.addInitScript(() => {
     getEncodingSettings:async()=>{await new Promise(r=>setTimeout(r,150));return structuredClone(state.encoding);},setEncodingSettings:async e=>{state.encoding=structuredClone(e);localStorage.setItem('mockEncoding',JSON.stringify(e));return{success:true};},
     getProcessingFormat:async()=>({format:'vs.YUV420P8'}),getOutputFormat:async()=>({format:'mkv'}),getVideoCompareArgs:async()=>({args:'-W'}),getColorimetrySettings:async()=>({overwriteMatrix:false,matrix709:false,defaultMatrix:'709',defaultPrimaries:'709',defaultTransfer:'709'}),
     getEncodingSettingsExpanded:async()=>({expanded:true}),setEncodingSettingsExpanded:async()=>({success:true}),
-    getUpdateReport:async()=>({report:null}),checkForUpdates:async()=>({success:true,updateAvailable:false}),checkVsMlrtVersion:async()=>({needsNotification:false,storedVersion:'16.1',currentVersion:'16.1',engineCount:0}),
+    getUpdateReport:async()=>({report:null,decisions:[]}),checkForUpdates:async()=>({success:true,updateAvailable:false}),checkVsMlrtVersion:async()=>({needsNotification:false,storedVersion:'16.1',currentVersion:'16.1',engineCount:0}),
     setPreviewEnabled:async enabled=>{state.preview=enabled;return{success:true};},previewClose:async()=>({success:true}),
     getVersion:async()=>({version:'2.1.0'}),checkPluginDependencies:async()=>({installed:true}),
     selectVideoFile:async()=>state.selectedFiles.shift()??null,
@@ -84,8 +86,20 @@ await page.getByLabel('Target video bitrate (Mbps)',{exact:true}).fill('15');
 await page.getByRole('button',{name:/Apply current settings to all pending/}).click();
 await page.getByRole('button',{name:'Apply to all pending',exact:true}).click();
 await page.waitForFunction(()=>window.test.queue.every(j=>j.workflow.encoding.simple.bitrateMbps===15));
+await page.getByTitle('Settings',{exact:true}).click();
+await page.getByText('No approved updates are currently offered for this installation.',{exact:true}).waitFor();
+await page.getByRole('checkbox',{name:'Show experimental models (GPU validation pending)',exact:true}).check();
+await page.getByText('Catalog test model 1',{exact:true}).waitFor();
+await page.getByRole('button',{name:'Install',exact:true}).click();
+assert.equal(await page.evaluate(()=>!!window.test.componentInstalled),false);
+await page.getByRole('alertdialog',{name:'Install component',exact:true}).getByRole('button',{name:'Cancel',exact:true}).last().click();
+assert.equal(await page.evaluate(()=>!!window.test.componentInstalled),false);
+await page.getByRole('button',{name:'Install',exact:true}).click();
+await page.getByRole('alertdialog',{name:'Install component',exact:true}).getByRole('button',{name:'Install',exact:true}).click();
+await page.getByRole('button',{name:'Installed',exact:true}).waitFor();
+assert.equal(await page.evaluate(()=>window.test.componentInstalled),true);
 assert.deepEqual(errors,[]);
 if (process.env.VAPOURKIT_SMOKE_SCREENSHOT) await page.screenshot({path:process.env.VAPOURKIT_SMOKE_SCREENSHOT,fullPage:true});
-console.log('PASS: GPU recovery, both picker cancellations, selected filter commit, preview persistence, guided encoding, source track selection, inherited batch settings and batch apply; no browser exceptions.');
+console.log('PASS: GPU recovery, both picker cancellations, selected filter commit, preview persistence, guided encoding, source track selection, inherited batch settings batch apply, curated catalog opt-in and confirmed installation; no browser exceptions.');
 } finally { await browser?.close(); server.kill(); }
 })().catch(e=>{console.error(e);process.exit(1);});

@@ -1,3 +1,4 @@
+import { ComponentUpdatesPanel } from './ComponentUpdatesPanel';
 import { memo, useState, useEffect } from 'react';
 import { Settings, Info, Terminal, FolderOpen, Package, FileCode, RotateCcw, Cpu, Play, ChevronDown, ChevronUp, HardDrive, Palette, MessageCircle, PackageCheck, ChevronRight } from 'lucide-react';
 import type { BackendId, DiscordRichPresenceSettings, UpdateReportSnapshot } from '../electron.d';
@@ -169,6 +170,7 @@ export const SettingsModal = memo<SettingsModalProps>(({
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'general' && (
           <>
+            <ComponentUpdatesPanel />
             {(updateNotes?.report || (updateNotes?.decisions.length ?? 0) > 0) && updateNotes && (
               <section>
                 <ModalSectionHeader icon={PackageCheck} title="Last Update" />

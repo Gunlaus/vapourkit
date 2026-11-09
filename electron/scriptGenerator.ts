@@ -320,6 +320,15 @@ export class VapourSynthScriptGenerator {
    * half a file.
    */
   private async syncRuntime(): Promise<void> {
+    const helper = 'vk_model_runtime.py';
+    const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
+    if (await fs.pathExists(helperSource)) {
+      await fs.ensureDir(PATHS.CONFIG);
+      const content = await fs.readFile(helperSource);
+      const staged = path.join(PATHS.CONFIG, helper + '.' + process.pid + '.tmp');
+      await fs.writeFile(staged, content);
+      await fs.move(staged, path.join(PATHS.CONFIG, helper), { overwrite: true });
+    }
     const target = path.join(PATHS.CONFIG, RUNTIME_FILE);
     const bundled = path.join(fixAsarPath(app.getAppPath()), 'include', RUNTIME_FILE);
     if (await fs.pathExists(bundled)) {
@@ -547,6 +556,7 @@ export class VapourSynthScriptGenerator {
       template = template.replace(/clip\.set_output\(\)\s*$/, '');
     }
 
+    if (!config.generatePreviewOutputs) template += '\n# Validate actual frames before FFmpeg starts (including custom AI wrappers).\nfor _vk_probe in sorted({0, min(2, clip.num_frames - 1), clip.num_frames - 1}):\n    clip.get_frame(_vk_probe)\n';
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
     logger.info(`Generated script: ${tempScriptPath}`);
@@ -577,37 +587,19 @@ export class VapourSynthScriptGenerator {
     code += `${CLIP} = core.std.Expr(${CLIP}, expr=['x 0 max 1 min'])\n`;
 
     // Determine num_streams value (default to 2 if not specified)
-    const callOptions = { numStreams: numStreams ?? 2, useFp32 };
+    const metadataKey = path.basename(modelFile.replace(/\\/g, '/'), path.extname(modelFile));
+    const callOptions = { numStreams: numStreams ?? 2, useFp32, useBf16: configManager.getModelMetadata?.(metadataKey)?.useBf16 ?? false };
 
     // Generate model inference code based on model type
     if (modelType === 'vsr') {
       // Use temporalFrames parameter or default to 5 for backward compatibility
       const frames = temporalFrames ?? 5;
-      const halfFrames = Math.floor(frames / 2);
-
+      if (!Number.isInteger(frames) || frames < 1 || frames % 2 === 0) throw new Error('Centered temporal models require a positive odd frame count; this model needs a dedicated frame-order adapter.');
       code += `# Temporal upscaling (${frames}-frame VSR architecture)\n`;
-
-      // Generate frame shift variables dynamically based on frame count
-      const frameVars: string[] = [];
-      for (let i = -halfFrames; i <= halfFrames; i++) {
-        if (i === 0) {
-          frameVars.push(CLIP);
-        } else {
-          const varName = i < 0 ? `m${Math.abs(i)}` : `p${i}`;
-          const shift = Math.abs(i);
-          if (i < 0) {
-            code += `${varName} = ${CLIP}[:${shift}] + ${CLIP}[:-${shift}]   # shift ${i}\n`;
-          } else {
-            code += `${varName} = ${CLIP}[${shift}:] + ${CLIP}[-${shift}:]   # shift +${i}\n`;
-          }
-          frameVars.push(varName);
-        }
-      }
-
-      // The model copies frame props from its first clip, which holds the
-      // earliest neighbour; each frame takes its own back, durations included.
+      code += 'import vk_model_runtime as _vk_models\n';
+      code += `_vk_window = _vk_models.temporal_window(${CLIP}, ${frames})\n`;
       code += `_vk_centre = ${CLIP}\n`;
-      code += provider.modelCallCode(`[${frameVars.join(', ')}]`, modelFile, callOptions);
+      code += provider.modelCallCode('_vk_window', modelFile, callOptions);
       code += `${CLIP} = core.std.CopyFrameProps(${CLIP}, _vk_centre)\n`;
       code += '\n';
     } else {

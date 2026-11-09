@@ -294,6 +294,9 @@ export interface ElectronAPI {
   onPluginDependencyProgress: (callback: (progress: PluginDependencyProgress) => void) => () => void;
   
   // Update operations
+  checkComponents: (online: boolean) => Promise<import('../electron/componentCatalog').ComponentSnapshot>;
+  installComponent: (id: string, version: string, experimental: boolean) => Promise<{ restart: boolean; message: string }>;
+  rollbackComponent: (kind: 'runtime' | 'ffmpeg' | 'filters') => Promise<void>;
   checkForUpdates: () => Promise<{ success: boolean; data?: UpdateInfo; error?: string }>;
   openReleasesPage: () => Promise<{ success: boolean; error?: string }>;
   openReleaseUrl: (url: string) => Promise<{ success: boolean; error?: string }>;
@@ -570,6 +573,8 @@ export interface InitializeModelResult {
 export interface ValidateOnnxModelResult {
   isValid: boolean;
   error?: string;
+  contract?: import('../electron/modelContract').ModelContract;
+  compatibilityError?: string;
   inputShape?: number[];
   outputShape?: number[];
   inputName?: string;
@@ -591,6 +596,7 @@ export interface ModelInitProgress {
 }
 
 export interface ImportModelParams {
+  deferBuild?: boolean;
   onnxPath: string;
   modelName: string;
   minShapes: string;

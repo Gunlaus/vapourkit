@@ -79,6 +79,8 @@ async function generate(
 }
 
 beforeAll(async () => {
+  await fs.ensureDir(path.join(testRoot, 'include'));
+  await fs.copy(path.join(__dirname, '..', 'include', 'vk_model_runtime.py'), path.join(testRoot, 'include', 'vk_model_runtime.py'));
   // generateScript reads the template from <appData>/config/; stage the real
   // bundled template there so tests exercise the actual placeholder layout
   const templateSrc = path.join(__dirname, '..', 'include', 'vapoursynth_template.vpy');
@@ -256,17 +258,16 @@ describe('inference backend selection', () => {
   it('emits TensorRT code for the Windows default backend', async () => {
     const script = await generate([aiFilter(0, 'C:\\models\\m_fp16.engine')], false);
 
-    expect(script).toContain('core.trt.Model(clip, engine_path="C:/models/m_fp16.engine"');
+    expect(script).toContain('_vk_models.load_model(clip, "C:/models/m_fp16.engine"');
     expect(script).not.toContain('core.ort.Model');
   });
 
-  it('retries a TensorRT engine whose I/O is the other float format (#12)', async () => {
+  it('uses the validated loader to resolve actual I/O and workflow dimensions', async () => {
     const script = await generate([aiFilter(0, 'C:\\models\\m_fp16.engine')], false);
-
-    // The retry converts to the other float format and calls the same engine.
-    expect(script).toContain("if 'bits per sample mismatch' not in str(_vk_trt_error):");
-    expect(script).toContain('_vk_trt_fmt = vs.RGBS if _vk_trt_in[0].format.bits_per_sample == 16 else vs.RGBH');
-    expect(script.match(/core\.trt\.Model\(/g)).toHaveLength(2);
+    expect(script).toContain('_vk_models.load_model(clip, "C:/models/m_fp16.engine"');
+    expect(script).toContain('vk_model_runtime as _vk_models');
+    expect(script).toContain('builder=');
+    expect(script).toContain('python=');
   });
 
   it('emits DirectML code when the default backend is directml', async () => {
@@ -283,7 +284,7 @@ describe('inference backend selection', () => {
       aiFilter(1, 'C:\\models\\b_fp16.onnx', 'directml'),
     ], false);
 
-    expect(script).toContain('core.trt.Model(clip, engine_path="C:/models/a_fp16.engine"');
+    expect(script).toContain('_vk_models.load_model(clip, "C:/models/a_fp16.engine"');
     expect(script).toContain('core.ort.Model(clip, network_path="C:/models/b_fp16.onnx"');
   });
 
@@ -299,8 +300,8 @@ describe('inference backend selection', () => {
       false, 'tensorrt', 2,
     );
 
-    expect(script).toContain('num_streams=4');
-    expect(script).not.toContain('num_streams=2');
+    expect(script).toContain('streams=4');
+    expect(script).not.toContain('streams=2');
   });
 
   it('inherits the global num_streams when a filter has no override', async () => {
@@ -309,7 +310,7 @@ describe('inference backend selection', () => {
       false, 'tensorrt', 3,
     );
 
-    expect(script).toContain('num_streams=3');
+    expect(script).toContain('streams=3');
   });
 
   it('applies per-filter num_streams independently per model', async () => {
@@ -321,8 +322,8 @@ describe('inference backend selection', () => {
       false, 'tensorrt', 2,
     );
 
-    expect(script).toContain('num_streams=1');
-    expect(script).toContain('num_streams=2');
+    expect(script).toContain('streams=1');
+    expect(script).toContain('streams=2');
   });
 
   it('maps legacy useDirectML booleans to backend ids', async () => {
@@ -796,7 +797,7 @@ describe('source timing', () => {
     try {
       const script = await generate([aiFilter(0, 'C:\\models\\2x_TestVSR_fp16.engine', 'tensorrt')], false);
       const centre = script.indexOf('_vk_centre = clip\n');
-      const call = script.indexOf('core.trt.Model([m2, m1, clip, p1, p2]');
+      const call = script.indexOf('_vk_models.load_model(_vk_window');
       const copy = script.indexOf('clip = core.std.CopyFrameProps(clip, _vk_centre)');
       expect(centre).toBeGreaterThan(-1);
       expect(call).toBeGreaterThan(centre);

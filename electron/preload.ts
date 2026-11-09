@@ -251,6 +251,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   
   // Update operations
+  checkComponents: (online: boolean) => ipcRenderer.invoke('components-check', online),
+  installComponent: (id: string, version: string, experimental: boolean) => ipcRenderer.invoke('components-install', { id, version, experimental }),
+  rollbackComponent: (kind: 'runtime' | 'ffmpeg' | 'filters') => ipcRenderer.invoke('components-rollback', kind),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   openReleasesPage: () => ipcRenderer.invoke('open-releases-page'),
   openReleaseUrl: (url: string) => ipcRenderer.invoke('open-release-url', url),

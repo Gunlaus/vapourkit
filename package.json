@@ -19,6 +19,7 @@
         "test:watch": "vitest",
         "test:electron": "vitest run -c vitest.config.electron.ts",
         "test:ui": "node scripts/devUiSmoke.cjs",
+        "test:models": "python -m unittest discover -s scripts/tests -p test_model_runtime.py -v",
         "test:media": "cross-env VK_MEDIA_TESTS=1 vitest run -c vitest.config.electron.ts electron/mediaTracks.integration.test.ts"
     },
     "keywords": [
@@ -84,10 +85,12 @@
             "include/filter_templates/**/*.vkfilter",
             "include/vapoursynth_template.vpy",
             "include/build_trt_engine.py",
+            "include/vk_model_runtime.py",
             "include/preview_server.py",
             "include/align_videos.py",
             "include/vk_runtime.py",
             "include/stock-app-config.json",
+            "include/component-catalog.json",
             "package.json",
             "!data/**/*"
         ],
@@ -99,10 +102,12 @@
             "include/filter_templates/**/*.vkfilter",
             "include/vapoursynth_template.vpy",
             "include/build_trt_engine.py",
+            "include/vk_model_runtime.py",
             "include/preview_server.py",
             "include/align_videos.py",
             "include/vk_runtime.py",
             "include/stock-app-config.json",
+            "include/component-catalog.json",
             "node_modules/7zip-bin/**/*"
         ],
         "win": {

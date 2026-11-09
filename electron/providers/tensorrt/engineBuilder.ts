@@ -204,6 +204,7 @@ export class TrtEngineBuildJob implements ModelBuildJob {
   ): Promise<void> {
     logger.model(`Engine build arguments: ${args.join(' ')}`);
     const builderScript = await ensureEngineBuilderScript();
+    args = [...args, '--vkAdapter=rgb-window-v1'];
     if (this.cancelRequested) throw new BuildCancelledError();
 
     return new Promise((resolve, reject) => {
