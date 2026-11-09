@@ -4,7 +4,8 @@ import * as path from 'path';
 import { logger } from './logger';
 import { describeModel, type ModelContract } from './modelContract';
 import { modelPackageFiles } from './modelPackage';
-import { inspectOnnxGraph, type OnnxGraphInfo } from './onnxGraphInspector';
+import type { OnnxGraphInfo } from './onnxGraphInspector';
+import { inspectResolvedOnnxGraph } from './modelGraphResolver';
 import { resolveModelPrecision, precisionFromName, type ModelPrecision } from './modelPrecision';
 
 export interface OnnxModelInfo {
@@ -57,7 +58,7 @@ export class ModelValidator {
 
       // Read the graph itself first. ONNX Runtime cannot see BF16 weights (or
       // load a BF16 graph at all), so precision has to come from the file.
-      const graph = inspectOnnxGraph(onnxPath);
+      const graph = await inspectResolvedOnnxGraph(onnxPath);
       let contract: ModelContract | undefined;
       let compatibilityError: string | undefined;
       if (graph) {

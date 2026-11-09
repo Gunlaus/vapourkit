@@ -31,6 +31,10 @@ from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
 
+# Windows embedded Python overrides sys.path with pythonXY._pth. Explicitly
+# expose application-owned siblings for manual and workflow-triggered builds.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 
 # A successful final build is required before a learned blacklist is persisted.
 # Thirty is intentionally conservative: most models converge in one to a few

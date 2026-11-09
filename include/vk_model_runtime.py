@@ -41,22 +41,42 @@ def digest(file):
     return value.hexdigest()
 
 
-def graph_contract(source):
+def inspect_bindings(source):
+    """Resolve exported symbols without rewriting the source model/weights."""
     import onnx
     model = onnx.load(str(source), load_external_data=False)
-    initializers = {tensor.name for tensor in model.graph.initializer}
-    inputs = [item for item in model.graph.input if item.name not in initializers]
-    outputs = list(model.graph.output)
-    def binding(item):
-        value = item.type.tensor_type
-        return {'name': item.name, 'dtype': int(value.elem_type),
-                'shape': [int(d.dim_value) if d.HasField('dim_value') else d.dim_param or None for d in value.shape.dim]}
-    ins, outs = list(map(binding, inputs)), list(map(binding, outputs))
+    def bindings(graph):
+        initializers = {tensor.name for tensor in graph.initializer}
+        def binding(item):
+            value = item.type.tensor_type
+            return {'name': item.name, 'dtype': int(value.elem_type),
+                    'shape': [int(d.dim_value) if d.HasField('dim_value') else d.dim_param or None for d in value.shape.dim]}
+        return ([binding(item) for item in graph.input if item.name not in initializers],
+                [binding(item) for item in graph.output])
+    ins, outs = bindings(model.graph)
+    if any(len(item['shape']) == 4 and not isinstance(item['shape'][1], int) for item in ins + outs):
+        try:
+            inferred = onnx.shape_inference.infer_shapes(model, check_type=True, strict_mode=False, data_prop=True)
+            ins, outs = bindings(inferred.graph)
+        except Exception as error:
+            raise RuntimeError('Could not resolve ONNX tensor channels using shape inference: ' + str(error)) from error
+    return model, ins, outs
+
+
+def graph_contract(source):
+    import onnx
+    model, ins, outs = inspect_bindings(source)
     if len(ins) != 1 or len(outs) != 1 or any(len(item['shape']) != 4 for item in ins + outs):
         raise RuntimeError('This model needs a dedicated tensor-layout adapter; automatic RGB setup supports one NCHW input and output.')
     channels = ins[0]['shape'][1]
-    if not isinstance(channels, int) or channels < 3 or channels % 3 or (channels // 3) % 2 == 0 or outs[0]['shape'][1] != 3:
-        raise RuntimeError('Unsupported RGB temporal layout. Use an image model or an odd channel-packed RGB window.')
+    if not isinstance(channels, int):
+        raise RuntimeError(f"Input {ins[0]['name']!r} channel dimension is unresolved after ONNX shape inference: {channels!r}. Re-export with a fixed RGB channel count or use a dedicated adapter.")
+    if channels < 3 or channels % 3 or (channels // 3) % 2 == 0:
+        raise RuntimeError(f"Unsupported RGB temporal layout: input {ins[0]['name']!r} has shape {ins[0]['shape']}. Use an image model or an odd channel-packed RGB window.")
+    output_channels = outs[0]['shape'][1]
+    if output_channels != 3:
+        reason = 'unresolved after ONNX shape inference' if not isinstance(output_channels, int) else 'incompatible with RGB'
+        raise RuntimeError(f"Output {outs[0]['name']!r} channel dimension is {reason}: {output_channels!r}; shape {outs[0]['shape']}. The RGB adapter requires three output channels.")
     if any(item['dtype'] not in (1, 10, 16) for item in ins + outs):
         raise RuntimeError('The RGB adapter supports FP32/FP16/BF16 image tensors only.')
     external = set()
@@ -251,8 +271,9 @@ def read_manifest(file):
 
 def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
     """Select/rebuild for the actual stage shape before any FFmpeg job starts."""
-    clips = clips if isinstance(clips, list) else [clips]
-    first = clips[0]
+    supplied_window = isinstance(clips, list)
+    clips = clips if supplied_window else [clips]
+    first = clips[len(clips) // 2] if supplied_window else clips[0]
     if any((c.width, c.height) != (first.width, first.height) for c in clips): raise RuntimeError('Temporal input dimensions differ.')
     if first.width <= 0 or first.height <= 0: raise RuntimeError('Resize variable-resolution input before this model; fixed stage dimensions are required.')
     original = (first.width, first.height)
@@ -267,6 +288,11 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
         source = Path(re.sub(r'_(fp16|fp32|bf16)\.engine$', '.onnx', str(engine_path)))
     if not source.is_file(): raise RuntimeError('This engine has no source ONNX. Import its complete model package to validate or rebuild it.')
     contract = cached_contract(source)
+    required_frames = contract['inputs'][0]['shape'][1] // 3
+    if len(clips) != required_frames:
+        # The generator's VSR list is centered, so its middle clip is the source.
+        clips = temporal_window(first, required_frames) if required_frames > 1 else [first]
+        shape[1] = required_frames * 3
     contract_key = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
     check_key = (str(engine_path), tuple(shape), streams, contract_key)
     cached = _CHECKED.get(check_key)
@@ -318,3 +344,14 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
         if not right.is_integer() or not bottom.is_integer(): raise RuntimeError('Cannot crop padding for this model output scale.')
         output = vs.core.std.CropRel(output, right=int(right), bottom=int(bottom))
     return output
+
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3 or sys.argv[1] != '--inspect-bindings':
+        raise SystemExit('Usage: vk_model_runtime.py --inspect-bindings MODEL.onnx')
+    try:
+        _, inputs, outputs = inspect_bindings(sys.argv[2])
+        print(json.dumps({'inputs': inputs, 'outputs': outputs}))
+    except Exception as error:
+        print('ONNX shape inspection failed: ' + str(error), file=sys.stderr)
+        raise SystemExit(1)

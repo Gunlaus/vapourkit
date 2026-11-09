@@ -14,6 +14,7 @@ import { downloadToFile } from './download';
 import { fileDigest, importModelPackage } from './modelPackage';
 import { inspectOnnxGraph } from './onnxGraphInspector';
 import { describeModel } from './modelContract';
+import { inspectResolvedOnnxGraph } from './modelGraphResolver';
 import { validateFilterTemplate } from './filterValidation';
 import { writeJsonAtomic } from './jsonFile';
 import { getBundledBasePath } from './utils';
@@ -85,7 +86,7 @@ export async function installComponent(id: string, version: string, allowExperim
       if ((await fs.stat(file)).size !== asset.bytes) throw new Error('Downloaded component size disagrees with the approved manifest.');
     }
     if (entry.kind === 'model' && entry.model) {
-      const graph = inspectOnnxGraph(path.join(stage, entry.model.file));
+      const graph = await inspectResolvedOnnxGraph(path.join(stage, entry.model.file));
       if (!graph) throw new Error('Downloaded model is not a readable ONNX graph.');
       const contract = describeModel(graph, { modelType: entry.model.type, temporalFrames: entry.model.frames, spatialMultiple: entry.model.spatialMultiple, catalog: true });
       await fs.writeJson(path.join(stage, 'model-contract.json'), contract);

@@ -32,15 +32,23 @@ jobs:
       - run: npm test
       - run: npm run test:electron
       - uses: actions/setup-python@v5
-        if: runner.os == 'Linux'
         with:
           python-version: '3.12'
+      - name: Test isolated engine-builder imports
+        if: runner.os == 'Linux'
+        run: python scripts/testEmbeddedBuilder.py
+      - name: Test Windows embedded engine-builder imports
+        if: runner.os == 'Windows'
+        run: python scripts/testEmbeddedBuilder.py --download
       - name: Install model validation test dependencies
         if: runner.os == 'Linux'
         run: python -m pip install onnx onnxruntime numpy
       - name: Test model contracts and engine publication
         if: runner.os == 'Linux'
         run: npm run test:models
+      - name: Test official Adore FP16 export
+        if: runner.os == 'Linux'
+        run: python scripts/testAdoreExport.py --electron
       - name: Install browser for UI smoke tests
         if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium

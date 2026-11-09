@@ -48,3 +48,13 @@ To approve a component, review its license and complete artifacts, test supporte
 - `npm run test:media` (configured FFmpeg/ffprobe/VapourSynth)
 
 The browser smoke test includes experimental opt-in, cancelled acceptance without installation, and accepted installation, alongside existing encoding/filter/batch controls. Python tests exercise real ONNX packages and CPU reference comparisons, with mocked GPU/plugin boundaries. Physical NVIDIA engine execution was not available in the development environment and must not be inferred from these tests.
+
+## Follow-up: Windows helper imports and symbolic channels
+
+The builder explicitly adds its own directory to `sys.path` before importing app helpers. This is necessary under Windows embedded Python's `python313._pth` isolation, including child builders launched during workflow preparation. Helper staging repairs missing/stale application copies. Missing application modules receive application repair guidance rather than plugin reinstall advice.
+
+When channel metadata is symbolic, Electron import, package creation, and catalog validation invoke the same Python shape inspector used by runtime validation. ONNX shape inference resolves channels without rewriting the original graph or external weights. Unresolved/non-RGB layouts remain rejected with the binding name, shape and reason. Existing TensorRT workflows reconcile their saved image/temporal selection against the resolved tensor channels, using the center source frame of a generated temporal window.
+
+`python scripts/testEmbeddedBuilder.py --download` tests the real Windows embeddable CPython configuration without a GPU. It exercises manual/workflow working directories, helper imports in precision caching, and candidate publication with only GPU work stubbed. Linux uses `python scripts/testEmbeddedBuilder.py` with isolation enabled. CI runs both.
+
+`python scripts/testAdoreExport.py --electron` downloads the official Adore FP16 fixture, verifies SHA-256, exercises real Electron inspection and immutable package import, and checks runtime contract resolution and CPU inference. It does not certify TensorRT/GPU execution. The weights are temporary test inputs and are not committed or bundled. Existing unit fixtures additionally reject unresolved and non-RGB output channels.

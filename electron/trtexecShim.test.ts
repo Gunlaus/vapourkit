@@ -67,6 +67,13 @@ describe('ensureTrtexecShim', () => {
     expect(shim).toContain(IS_WINDOWS ? '%*' : '"$@"');
   });
 
+  it('restages a missing application helper before returning a usable builder', async () => {
+    const helper = path.join(PATHS.APP_DATA, 'vk_model_runtime.py');
+    await fs.remove(helper);
+    await ensureTrtexecShim();
+    expect(await fs.readFile(helper, 'utf8')).toBe(await fs.readFile(path.join(testRoot, 'include', 'vk_model_runtime.py'), 'utf8'));
+  });
+
   it('restores the environment vsmlrt strips before spawning it', async () => {
     const shim = await fs.readFile(await ensureTrtexecShim(), 'utf-8');
 

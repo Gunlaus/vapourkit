@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { describeModel } from './modelContract';
 import { inspectOnnxGraph } from './onnxGraphInspector';
+import { inspectResolvedOnnxGraph } from './modelGraphResolver';
 
 export async function fileDigest(file: string): Promise<string> {
   const hash = createHash('sha256');
@@ -48,7 +49,7 @@ export async function importModelPackage(source: string, modelsRoot: string, nam
       if (file === `${name}.onnx`) throw new Error('External weights collide with the ONNX filename. Rename the model.');
       await fs.copy(path.join(path.dirname(source), file), path.join(stage, file));
     }
-    const graph = inspectOnnxGraph(path.join(stage, `${name}.onnx`));
+    const graph = await inspectResolvedOnnxGraph(path.join(stage, `${name}.onnx`));
     if (!graph) throw new Error('Cannot inspect imported graph.');
     await fs.writeJson(path.join(stage, `${name}.onnx.contract.json`), describeModel(graph));
     if (await packageIdentity(path.join(stage, `${name}.onnx`)) !== identity) throw new Error('Model files changed during import; retry after the download finishes.');

@@ -1,6 +1,6 @@
 import { importModelPackage, listModelFiles } from './modelPackage';
 import { describeModel } from './modelContract';
-import { inspectOnnxGraph } from './onnxGraphInspector';
+import { inspectResolvedOnnxGraph } from './modelGraphResolver';
 import { ipcMain, BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -224,7 +224,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           });
         };
 
-        const inspected = inspectOnnxGraph(params.onnxPath);
+        const inspected = await inspectResolvedOnnxGraph(params.onnxPath);
         if (!inspected) throw new Error('Cannot inspect model graph.');
         describeModel(inspected, { modelType: params.modelType, temporalFrames: params.temporalFrames });
         sendProgress('converting', 0, 'Starting TensorRT engine conversion...');
@@ -330,7 +330,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
 
       try {
 
-        const inspected = inspectOnnxGraph(params.onnxPath);
+        const inspected = await inspectResolvedOnnxGraph(params.onnxPath);
         if (!inspected) throw new Error('Cannot inspect model graph.');
         describeModel(inspected, { modelType: params.modelType, temporalFrames: params.temporalFrames });
         // Validation can skip a reference-runtime load, never the input contract.

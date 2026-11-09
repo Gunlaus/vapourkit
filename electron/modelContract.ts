@@ -24,7 +24,7 @@ export function describeModel(graph: ContractGraph, options: { modelType?: strin
   if (frames % 2 === 0) throw new Error('Centered temporal models require an odd frame count. Even-frame models need an explicit frame-order adapter.');
   if (options.modelType && (options.modelType === 'vsr') !== (frames > 1)) throw new Error(`Selected model type disagrees with the graph: ${frames} RGB frame(s). Refresh automatic detection.`);
   if (options.temporalFrames !== undefined && frames !== options.temporalFrames) throw new Error(`The graph requires ${frames} temporal frames, but ${options.temporalFrames} were configured.`);
-  if (output.shape[1] !== 3) throw new Error('The RGB adapter requires exactly three output channels. Select the appropriate architecture adapter.');
+  if (output.shape[1] !== 3) throw new Error(`Output \"${output.name}\" has ${typeof output.shape[1] === 'number' ? 'incompatible' : 'unresolved'} channels (${output.shape[1]}); shape ${output.shape.join('×')}. The RGB adapter requires exactly three output channels after ONNX shape inference. Re-export with explicit RGB channels or use a dedicated adapter.`);
   for (const binding of [input, output]) if (!['float16', 'float32', 'bfloat16'].includes(binding.dataType)) throw new Error(`Unsupported image tensor type: ${binding.dataType}.`);
   const multiple = options.spatialMultiple ?? 1;
   if (!Number.isInteger(multiple) || multiple < 1 || multiple > 256) throw new Error('Invalid architecture spatial multiple.');

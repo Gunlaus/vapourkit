@@ -17,6 +17,13 @@ describe('formatVapourSynthValidationError', () => {
     expect(message).toContain("Script evaluation failed:\nPython exception: ModuleNotFoundError: No module named 'vs_undistort'");
   });
 
+  it('identifies missing application modules without recommending plugin reinstall', () => {
+    const message = formatVapourSynthValidationError("ModuleNotFoundError: No module named 'vk_model_runtime'");
+    expect(message).toContain('application-file or Python search-path problem');
+    expect(message).not.toContain('Partial reinstall');
+    expect(message).not.toContain('Open Plugins');
+  });
+
   it('preserves other warnings that may help diagnose the failure', () => {
     const output = [
       'Warning: Plugin C:\\plugins\\autocrop.dll is using API3 which is deprecated and will be removed shortly.',

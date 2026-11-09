@@ -42,6 +42,25 @@ class ModelRuntimeTests(unittest.TestCase):
         self.assertNotEqual(runtime.graph_contract(source)['files'], a['files'])
         weights.unlink()
         with self.assertRaisesRegex(RuntimeError, 'external weights'): runtime.graph_contract(source)
+    def test_symbolic_output_channels_are_resolved_without_editing_source(self):
+        source = self.root / 'symbolic.onnx'; model(source)
+        graph = onnx.load(source)
+        channel = graph.graph.output[0].type.tensor_type.shape.dim[1]
+        channel.ClearField('dim_value'); channel.dim_param = 'Divoutput_dim_1'
+        onnx.save(graph, source)
+        before = source.read_bytes()
+        self.assertEqual(runtime.graph_contract(source)['outputs'][0]['shape'][1], 3)
+        self.assertEqual(source.read_bytes(), before)
+
+    def test_inferred_non_rgb_and_unresolved_outputs_remain_rejected(self):
+        source = self.root / 'not-rgb.onnx'
+        for shape, operation in [([1, 1, 'h', 'w'], 'Identity'), ([1, 'unknown', 'h', 'w'], 'UnknownCustom')]:
+            a = helper.make_tensor_value_info('pixels', TensorProto.FLOAT, [1, 3, 'h', 'w'])
+            b = helper.make_tensor_value_info('output', TensorProto.FLOAT, shape)
+            node = helper.make_node(operation, ['pixels'], ['output'], domain='custom' if operation == 'UnknownCustom' else '')
+            onnx.save(helper.make_model(helper.make_graph([node], 'test', [a], [b]), opset_imports=[helper.make_opsetid('', 13), helper.make_opsetid('custom', 1)]), source)
+            with self.assertRaisesRegex(RuntimeError, 'three output channels'): runtime.graph_contract(source)
+
     def test_even_windows_and_five_dimensional_tensors_are_not_guessed(self):
         for channels, rank in [(6, 4), (3, 5), (1, 4)]:
             source = self.root / 'model.onnx'; model(source, channels, rank)
@@ -120,7 +139,9 @@ class ModelRuntimeTests(unittest.TestCase):
         with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test'}), patch.object(runtime.subprocess, 'run', build), patch.object(runtime, 'raw_model', return_value=output), patch.object(runtime, 'validate_output', side_effect=lambda o: o):
             runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
             self.assertIn('--shapes=pixels:1x3x1088x1920', calls[0])
-            runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
+            edge = types.SimpleNamespace(width=1920, height=1088)
+            runtime.load_model([edge, edge, clip, edge, edge], source, 2, 'builder.py', sys.executable)
+            self.assertEqual(runtime.raw_model.call_args.args[0], [clip])
             self.assertEqual(len(calls), 1)
             weights = self.root / 'weights.bin'; weights.write_bytes(weights.read_bytes() + b'new checkpoint')
             runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
