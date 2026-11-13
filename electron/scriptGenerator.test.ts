@@ -808,3 +808,21 @@ describe('source timing', () => {
     }
   });
 });
+
+describe('startup evaluation cost', () => {
+  it('keeps preview and encode scripts lazy, with no end-of-video probes', async () => {
+    for (const preview of [true, false]) {
+      const script = await generate([customFilter(0, 'Blur')], preview);
+      expect(script).not.toContain('clip.get_frame(');
+      expect(script).not.toContain('clip.num_frames - 1}');
+    }
+  });
+  it('executes one early frame only for an explicit validation', async () => {
+    const generator = new VapourSynthScriptGenerator('win32');
+    const scriptPath = await generator.generateScript({ inputVideo: 'C:/input.mkv', filters: [], validationMode: true });
+    const script = await fs.readFile(scriptPath, 'utf8');
+    expect(script).toContain('clip.get_frame(0)');
+    expect(script).not.toContain('for _vk_probe');
+    await fs.remove(scriptPath);
+  });
+});

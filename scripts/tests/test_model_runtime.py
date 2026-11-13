@@ -61,6 +61,26 @@ class ModelRuntimeTests(unittest.TestCase):
             onnx.save(helper.make_model(helper.make_graph([node], 'test', [a], [b]), opset_imports=[helper.make_opsetid('', 13), helper.make_opsetid('custom', 1)]), source)
             with self.assertRaisesRegex(RuntimeError, 'three output channels'): runtime.graph_contract(source)
 
+    def test_warm_engine_integrity_cache_invalidates_when_file_changes(self):
+        engine = self.root / 'model.engine'; engine.write_bytes(b'original')
+        with patch.object(runtime, 'digest', wraps=runtime.digest) as hash_file:
+            first = runtime.cached_digest(engine)
+            self.assertEqual(runtime.cached_digest(engine), first)
+            self.assertEqual(hash_file.call_count, 1)
+            engine.write_bytes(b'new engine contents')
+            self.assertNotEqual(runtime.cached_digest(engine), first)
+            self.assertEqual(hash_file.call_count, 2)
+
+    def test_contract_cache_survives_new_process_and_invalidates_external_weights(self):
+        source = self.root / 'model.onnx'; model(source, external=True)
+        original = runtime.cached_contract(source)
+        runtime._CONTRACTS.clear()
+        with patch.object(runtime, 'graph_contract', side_effect=AssertionError('Must reuse warm contract')):
+            self.assertEqual(runtime.cached_contract(source), original)
+        runtime._CONTRACTS.clear()
+        weights = self.root / 'weights.bin'; weights.write_bytes(weights.read_bytes() + b'changed')
+        self.assertNotEqual(runtime.cached_contract(source)['files'], original['files'])
+
     def test_even_windows_and_five_dimensional_tensors_are_not_guessed(self):
         for channels, rank in [(6, 4), (3, 5), (1, 4)]:
             source = self.root / 'model.onnx'; model(source, channels, rank)
@@ -136,7 +156,7 @@ class ModelRuntimeTests(unittest.TestCase):
             metadata = {'schema': 1, 'runtime': {'gpu': 'test'}, 'contract': runtime.graph_contract(source),
                         'engineSha256': runtime.digest(target), 'bindings': {'inputs': [{'shape': shape}], 'outputs': []}}
             Path(str(target) + '.json').write_text(json.dumps(metadata))
-        with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test'}), patch.object(runtime.subprocess, 'run', build), patch.object(runtime, 'raw_model', return_value=output), patch.object(runtime, 'validate_output', side_effect=lambda o: o):
+        with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test'}), patch.object(runtime.subprocess, 'run', build), patch.object(runtime, 'raw_model', return_value=output), patch.object(runtime, 'validate_output', side_effect=AssertionError('Workflow construction must remain lazy')):
             runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
             self.assertIn('--shapes=pixels:1x3x1088x1920', calls[0])
             edge = types.SimpleNamespace(width=1920, height=1088)

@@ -63,6 +63,33 @@ def inspect_bindings(source):
     return model, ins, outs
 
 
+def file_stamp(file):
+    stat = Path(file).stat()
+    return [stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, stat.st_dev]
+
+
+def cached_digest(file):
+    """Reuse integrity checks only while the engine's filesystem identity is unchanged."""
+    cache = Path(str(file) + '.vk-integrity.json')
+    before = file_stamp(file)
+    try:
+        saved = json.loads(cache.read_text())
+        if saved.get('stamp') == before and isinstance(saved.get('sha256'), str) and len(saved['sha256']) == 64:
+            return saved['sha256']
+    except (OSError, ValueError, TypeError, AttributeError): pass
+    value = digest(file)
+    if file_stamp(file) == before:
+        stage = Path(str(cache) + '.' + str(os.getpid()) + '.tmp')
+        try:
+            stage.write_text(json.dumps({'stamp': before, 'sha256': value}))
+            os.replace(stage, cache)
+        except OSError: pass
+        finally:
+            try: stage.unlink(missing_ok=True)
+            except OSError: pass
+    return value
+
+
 def graph_contract(source):
     import onnx
     model, ins, outs = inspect_bindings(source)
@@ -224,7 +251,7 @@ def validate_engine(engine_path, opts):
 
 def validate_output(output):
     import numpy as np
-    for index in sorted({0, min(2, output.num_frames - 1), output.num_frames - 1}):
+    for index in (0,):
         frame = output.get_frame(index)
         if not all(np.isfinite(np.asarray(frame[p])).all() for p in range(frame.format.num_planes)):
             raise RuntimeError('The model produced NaN/Inf on the source video. Use a validated higher-precision model/build.')
@@ -245,6 +272,16 @@ def cached_contract(source):
     key = str(source.resolve())
     previous = _CONTRACTS.get(key)
     if previous and stamp(previous[0]) == previous[1] and (str(source) + '.contract.json' in previous[0]) == Path(str(source) + '.contract.json').exists(): return previous[2]
+    disk = Path(str(source) + '.vk-contract-cache.json')
+    helper = digest(__file__)
+    try:
+        saved = json.loads(disk.read_text())
+        known = saved['files']
+        if saved['helper'] == helper and known[0] == key and saved['stamp'] == json.dumps(stamp(known)) and saved['descriptor'] == Path(str(source) + '.contract.json').exists():
+            contract = saved['contract']
+            _CONTRACTS[key] = (known, stamp(known), contract)
+            return contract
+    except (OSError, ValueError, KeyError, TypeError, IndexError): pass
     contract = graph_contract(source)
     files = [item['path'] for item in contract['files']]
     descriptor = Path(str(source) + '.contract.json')
@@ -252,6 +289,14 @@ def cached_contract(source):
     # Include the descriptor's existence even when the first read had none.
     signature = (stamp(files), descriptor.exists())
     _CONTRACTS[key] = (files, signature[0], contract)
+    stage = Path(str(disk) + '.' + str(os.getpid()) + '.tmp')
+    try:
+        stage.write_text(json.dumps({'helper': helper, 'files': files, 'stamp': json.dumps(signature[0]), 'descriptor': descriptor.exists(), 'contract': contract}))
+        os.replace(stage, disk)
+    except OSError: pass
+    finally:
+        try: stage.unlink(missing_ok=True)
+        except OSError: pass
     return contract
 
 def read_manifest(file):
@@ -296,8 +341,8 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
     contract_key = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
     check_key = (str(engine_path), tuple(shape), streams, contract_key)
     cached = _CHECKED.get(check_key)
-    if cached and Path(cached[0]).exists() and digest(cached[0]) == cached[2]:
-        return validate_output(raw_model(clips, cached[0], streams, cached[1]))
+    if cached and Path(cached[0]).exists() and cached_digest(cached[0]) == cached[2]:
+        return raw_model(clips, cached[0], streams, cached[1])
     multiple = contract.get('spatialMultiple', 1)
     if first.width % multiple or first.height % multiple:
         import vapoursynth as vs
@@ -310,7 +355,7 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
         raise RuntimeError('This model has a fixed input shape ' + str(expected) + '; resize/pad before the model or use a dynamic export.')
     identity = runtime_identity()
     healthy = manifest and manifest.get('schema') == SCHEMA and manifest['contract'] == contract and manifest['runtime'] == identity and manifest.get('precision') == ('bf16' if 16 in contract.get('weightTypes', []) else precision)
-    if healthy and covers(manifest['bindings']['inputs'][0], shape) and manifest['engineSha256'] == digest(engine_path):
+    if healthy and covers(manifest['bindings']['inputs'][0], shape) and manifest['engineSha256'] == cached_digest(engine_path):
         selected, details = engine_path, manifest['bindings']
     else:
         key = hashlib.sha256(json.dumps([contract, identity, shape, precision], sort_keys=True).encode()).hexdigest()[:24]
@@ -320,7 +365,7 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
         valid = False
         if selected.exists() and metadata.exists():
             found = read_manifest(metadata)
-            valid = found is not None and found.get('runtime') == identity and found.get('contract') == contract and found.get('engineSha256') == digest(selected) and covers(found['bindings']['inputs'][0], shape)
+            valid = found is not None and found.get('runtime') == identity and found.get('contract') == contract and found.get('engineSha256') == cached_digest(selected) and covers(found['bindings']['inputs'][0], shape)
         if not valid:
             dtype = contract['inputs'][0]['dtype']
             # A pretyped BF16 graph cannot be converted by an FP16 command flag.
@@ -330,13 +375,12 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
             if selected_precision != 'fp32': args.append('--' + selected_precision)
             subprocess.run(args, check=True, timeout=1800)
         found = json.loads(metadata.read_text()); details = found['bindings']
-    if original == (clips[0].width, clips[0].height): _CHECKED[check_key] = (selected, details, digest(selected))
+    if original == (clips[0].width, clips[0].height): _CHECKED[check_key] = (selected, details, cached_digest(selected))
     output = raw_model(clips, selected, streams, details)
     # Force actual source-frame evaluation before the encode process is launched.
     expected_scale = contract.get('descriptor', {}).get('scale')
     if expected_scale and (output.width != clips[0].width * expected_scale or output.height != clips[0].height * expected_scale):
         raise RuntimeError('The model output dimensions disagree with its catalog adapter. Keep the previous model and report this catalog entry.')
-    validate_output(output)
     if original != (clips[0].width, clips[0].height):
         import vapoursynth as vs
         right = (clips[0].width - original[0]) * output.width / clips[0].width

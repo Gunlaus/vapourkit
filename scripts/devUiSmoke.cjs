@@ -23,6 +23,8 @@ await page.addInitScript(() => {
   window.test=state;
   const handlers={
     platform:'linux',
+    listFilterRepository:async()=>[{id:'test.blur',name:'Repository Blur',description:'A test native blur',kind:'VSPlugin',version:'1',api:4,namespace:'blur',compatible:true,reason:'',installed:false},{id:'legacy',name:'Legacy API3',description:'unsupported',kind:'VSPlugin',version:'',api:3,namespace:'old',compatible:false,reason:'Requires API4',installed:false}],
+    installRepositoryFilter:async(id)=>{state.calls.push({name:'installRepositoryFilter',args:[id]});return{message:'Filter verified and installed'};},
     checkComponents:async()=>({catalog:{schema:1,client:1,revision:1,components:[{id:'test-model',version:'1',name:'Catalog test model',channel:'experimental',notes:'CPU tested; GPU pending.',license:'MIT',files:[{bytes:1000}]}]},installed:state.componentInstalled?{'test-model':'1'}:{},pendingRestart:false}),
     installComponent:async(id,version,experimental)=>{if(!experimental)throw Error('Experimental opt-in required');state.componentInstalled=true;return{restart:false,message:'Model installed alongside existing versions.'};},
     getInferenceBackendInfo:async()=>({hasCudaSupport:false,backend:'ncnn'}),checkDependencies:async()=>true,getNvencDriverProblem:async()=>null,
@@ -60,6 +62,15 @@ for(const choice of ['VS Filter','AI Model']) {
  assert.equal((await filters()).length,0,`Cancelling ${choice} added an empty step`);
 }
 await page.getByRole('button',{name:'Add filter',exact:true}).click();await page.getByRole('button',{name:'VS Filter',exact:true}).click();
+await page.getByRole('button',{name:'Get more filters',exact:true}).click();
+const repository=page.getByRole('dialog',{name:'Get more filters',exact:true});
+await repository.getByText('Repository Blur 1',{exact:true}).waitFor();
+assert.equal(await repository.getByRole('article').filter({hasText:'Legacy API3'}).getByRole('button',{name:'Install',exact:true}).isDisabled(),true);
+await repository.getByRole('article').filter({hasText:'Repository Blur'}).getByRole('button',{name:'Install',exact:true}).click();
+await page.getByRole('alertdialog',{name:'Install VapourSynth filter'}).getByRole('button',{name:'Install',exact:true}).click();
+await repository.getByText('Filter verified and installed',{exact:true}).waitFor();
+await repository.getByRole('button',{name:'Close',exact:true}).click();
+
 await page.getByText('Identity test',{exact:true}).click();
 await page.waitForFunction(()=>JSON.parse(localStorage.getItem('filters')||'[]').length===1);
 await page.getByTitle('Turn off preview panel',{exact:true}).click();
@@ -67,6 +78,7 @@ await page.waitForFunction(()=>localStorage.getItem('showPreview')==='false'&&!w
 assert.equal(await page.getByRole('region',{name:'Video preview panel'}).count(),0); // rail remains as the restore control
 await page.reload();await page.getByTitle('Turn on preview panel',{exact:true}).waitFor();
 await page.waitForFunction(()=>window.test.preview===false);
+assert.equal((await filters()).length,0,'Relaunch should start with an empty filter chain');
 await page.getByTitle('Turn on preview panel',{exact:true}).click();
 await page.getByLabel('Rate control',{exact:true}).selectOption('bitrate');
 await page.getByLabel('Target video bitrate (Mbps)',{exact:true}).fill('10');

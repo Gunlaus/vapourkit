@@ -88,7 +88,10 @@ const FFMPEG_COMPONENT = selectedComponentRoot(APP_DATA_PATH, 'ffmpeg', path.joi
  * from the Windows embedded runtime. Ask the venv interpreter for its exact
  * site-packages directory rather than inferring it from the filesystem.
  */
+const linuxSitePackageCache = new Map<string, string>();
 export function resolveLinuxSitePackages(vsPath: string = VS_PATH): string {
+  const cached = linuxSitePackageCache.get(vsPath);
+  if (cached) return cached;
   const pythonPath = path.join(vsPath, 'bin', 'python3');
   const result = spawnSync(
     pythonPath,
@@ -97,6 +100,7 @@ export function resolveLinuxSitePackages(vsPath: string = VS_PATH): string {
   );
   const sitePackages = result.status === 0 ? result.stdout.trim() : '';
   if (sitePackages) {
+    linuxSitePackageCache.set(vsPath, sitePackages);
     return sitePackages;
   }
   // The venv has not been created yet. This fallback is only used during its

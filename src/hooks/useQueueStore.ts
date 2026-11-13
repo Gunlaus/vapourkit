@@ -31,7 +31,8 @@ export function useQueueStore({ onLog, naming }: UseQueueStoreProps) {
     const loadState = async () => {
       try {
         const result = await window.electronAPI.getShowQueue();
-        setShowQueueRaw(result.show);
+        setShowQueueRaw(false);
+        if (result.show) await window.electronAPI.setShowQueue(false);
       } catch (error) {
         onLog(`Error loading queue state: ${error}`);
       } finally {

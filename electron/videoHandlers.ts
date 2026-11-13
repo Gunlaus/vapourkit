@@ -575,19 +575,7 @@ export function registerVideoHandlers(
       ));
       logger.info(`Generated preview script: ${scriptPath}`);
 
-      // Evaluate the graph before handing it to vs-view. Any runtime engine
-      // build then happens here, under the app's build banner and with the
-      // launch spinner still up, instead of freezing vs-view's own window — and
-      // script errors surface with our error handling rather than vs-view's.
-      const preflight = await evaluateScript(scriptPath);
-
-      if (preflight.error) {
-        logger.error('vs-view preflight failed:', preflight.error);
-        await scriptGenerator.cleanupScript(scriptPath);
-        return { success: false, error: preflight.error };
-      }
-
-      // Launch vs-view with the generated script
+      // vs-view evaluates the graph itself; a second vspipe process duplicated\n      // Python/GPU initialization and graph construction on every launch.\n      // Launch vs-view with the generated script
       const result = await VsViewManager.launch(scriptPath);
 
       if (result.success) {

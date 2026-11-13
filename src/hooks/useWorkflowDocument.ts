@@ -12,7 +12,6 @@ import {
   type WorkflowDocumentState,
 } from '../utils/workflowDocument';
 import {
-  adoptLegacySnapshot,
   configChanges,
   loadDocument,
   persistDocumentChange,
@@ -28,7 +27,6 @@ import {
 } from '../utils/workflowSettings';
 import {
   loadConfigSettings,
-  readEditingItemId,
   readProjectConfigAside,
   readStoredBackend,
   saveConfigSetting,
@@ -65,7 +63,7 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
   });
   const whenReady = useCallback(() => ready.promise, [ready]);
   // The item being edited when the app last closed, for App to go back to.
-  const [resumeEditingId] = useState(readEditingItemId);
+  const [resumeEditingId] = useState<string | null>(null);
 
   const onItemChangeRef = useRef(onItemChange);
   onItemChangeRef.current = onItemChange;
@@ -114,7 +112,7 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
 
   const [state, dispatch, getState] = useSyncReducer(
     workflowDocumentReducer,
-    loadDocument,
+    () => loadDocument(true),
     (next, previous) => {
       persistDocumentChange(next, previous, (itemId, workflow) => onItemChangeRef.current(itemId, workflow));
       syncConfig(next, getState);
@@ -122,7 +120,8 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
   );
 
   useEffect(() => {
-    adoptLegacySnapshot(getState());
+    // Do not recover an old working document implicitly; exported workflows are explicit.
+    writeEditingItemId(null);
   }, [getState]);
 
   // Read the config-held settings once setup has finished.

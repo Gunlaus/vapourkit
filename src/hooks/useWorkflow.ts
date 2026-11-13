@@ -73,15 +73,7 @@ export function useWorkflow({
   // settings that are saved, so after a restart they are what the project or
   // item has; if what they replaced lived only in memory, Clear went with it
   // and the settings from before the workflow were lost for good.
-  const [workflowState, setWorkflowState] = useState<LoadedWorkflowRecord>(() => {
-    try {
-      const saved = localStorage.getItem(LOADED_WORKFLOW_KEY);
-      if (saved) return JSON.parse(saved) as LoadedWorkflowRecord;
-    } catch {
-      // Unreadable: start with no workflow loaded.
-    }
-    return NO_WORKFLOW;
-  });
+  const [workflowState, setWorkflowState] = useState<LoadedWorkflowRecord>(NO_WORKFLOW);
 
   useEffect(() => {
     try {

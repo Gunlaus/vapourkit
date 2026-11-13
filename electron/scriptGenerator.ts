@@ -556,7 +556,9 @@ export class VapourSynthScriptGenerator {
       template = template.replace(/clip\.set_output\(\)\s*$/, '');
     }
 
-    if (!config.generatePreviewOutputs) template += '\n# Validate actual frames before FFmpeg starts (including custom AI wrappers).\nfor _vk_probe in sorted({0, min(2, clip.num_frames - 1), clip.num_frames - 1}):\n    clip.get_frame(_vk_probe)\n';
+    // Metadata/preview/encode setup remains lazy. Explicit validation executes one
+    // frame through the whole graph, without seeking to the end of the source.
+    if (config.validationMode) template += '\n# Validate the first output frame.\nclip.get_frame(0)\n';
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
     logger.info(`Generated script: ${tempScriptPath}`);

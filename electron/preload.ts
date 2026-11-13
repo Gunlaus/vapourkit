@@ -215,6 +215,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reloadBackend: () => ipcRenderer.invoke('reload-backend'),
   
   // Filter template operations
+  listFilterRepository: (refresh: boolean) => ipcRenderer.invoke('filter-repository-list', refresh),
+  installRepositoryFilter: (id: string) => ipcRenderer.invoke('filter-repository-install', id),
   getFilterTemplates: () => ipcRenderer.invoke('get-filter-templates'),
   saveFilterTemplate: (template: any) => ipcRenderer.invoke('save-filter-template', template),
   deleteFilterTemplate: (name: string) => ipcRenderer.invoke('delete-filter-template', name),

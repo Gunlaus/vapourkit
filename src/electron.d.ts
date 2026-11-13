@@ -27,6 +27,8 @@ export interface RocmSettingResult {
 }
 
 export interface ElectronAPI {
+  listFilterRepository: (refresh: boolean) => Promise<import('../electron/filterRepositoryTypes').RepositoryEntry[]>;
+  installRepositoryFilter: (id: string) => Promise<{ message: string }>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;
