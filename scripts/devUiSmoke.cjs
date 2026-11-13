@@ -23,7 +23,10 @@ await page.addInitScript(() => {
   window.test=state;
   const handlers={
     platform:'linux',
-    listFilterRepository:async()=>[{id:'test.blur',name:'Repository Blur',description:'A test native blur',kind:'VSPlugin',version:'1',api:4,namespace:'blur',compatible:true,reason:'',installed:false},{id:'legacy',name:'Legacy API3',description:'unsupported',kind:'VSPlugin',version:'',api:3,namespace:'old',compatible:false,reason:'Requires API4',installed:false}],
+    getPipelineSettings:async()=>state.pipeline??{optimizeAiChains:false,requests:0,previewHeight:720,previewFps:1},
+    setPipelineSettings:async(settings)=>{state.pipeline=settings;},
+    exportPipelineBenchmark:async()=>({cancelled:false,directory:'/bench',message:'Benchmark bundle saved'}),
+    listFilterRepository:async()=>[{id:'test.blur',name:'Repository Blur',description:'A test native blur',kind:'VSPlugin',version:'1',api:4,namespace:'blur',compatible:true,reason:'',installed:false},{id:'legacy',name:'Unsupported API5',description:'unsupported',kind:'VSPlugin',version:'',api:5,namespace:'old',compatible:false,reason:'API5 is unsupported',installed:false}],
     installRepositoryFilter:async(id)=>{state.calls.push({name:'installRepositoryFilter',args:[id]});return{message:'Filter verified and installed'};},
     checkComponents:async()=>({catalog:{schema:1,client:1,revision:1,components:[{id:'test-model',version:'1',name:'Catalog test model',channel:'experimental',notes:'CPU tested; GPU pending.',license:'MIT',files:[{bytes:1000}]}]},installed:state.componentInstalled?{'test-model':'1'}:{},pendingRestart:false}),
     installComponent:async(id,version,experimental)=>{if(!experimental)throw Error('Experimental opt-in required');state.componentInstalled=true;return{restart:false,message:'Model installed alongside existing versions.'};},
@@ -67,7 +70,7 @@ await page.getByRole('button',{name:'Add filter',exact:true}).click();await page
 await page.getByRole('button',{name:'Get more filters',exact:true}).click();
 const repository=page.getByRole('dialog',{name:'Get more filters',exact:true});
 await repository.getByText('Repository Blur 1',{exact:true}).waitFor();
-assert.equal(await repository.getByRole('article').filter({hasText:'Legacy API3'}).getByRole('button',{name:'Install',exact:true}).isDisabled(),true);
+assert.equal(await repository.getByRole('article').filter({hasText:'Unsupported API5'}).getByRole('button',{name:'Install',exact:true}).isDisabled(),true);
 await repository.getByRole('article').filter({hasText:'Repository Blur'}).getByRole('button',{name:'Install',exact:true}).click();
 await page.getByRole('alertdialog',{name:'Install VapourSynth filter'}).getByRole('button',{name:'Install',exact:true}).click();
 await repository.getByText('Filter verified and installed',{exact:true}).waitFor();
@@ -116,6 +119,12 @@ await page.getByRole('button',{name:'Install',exact:true}).click();
 await page.getByRole('alertdialog',{name:'Install component',exact:true}).getByRole('button',{name:'Install',exact:true}).click();
 await page.getByRole('button',{name:'Installed',exact:true}).waitFor();
 assert.equal(await page.evaluate(()=>window.test.componentInstalled),true);
+await page.getByRole('button',{name:'Processing',exact:true}).click();
+await page.getByRole('checkbox',{name:'Keep RGB between adjacent AI models (experimental)',exact:true}).check();
+await page.getByLabel('Concurrent frame requests',{exact:true}).selectOption('4');
+await page.getByLabel('Encoding preview height',{exact:true}).selectOption('360');
+await page.getByRole('button',{name:'Save pipeline settings',exact:true}).click();
+await page.waitForFunction(()=>window.test.pipeline?.requests===4&&window.test.pipeline?.optimizeAiChains===true);
 assert.deepEqual(errors,[]);
 if (process.env.VAPOURKIT_SMOKE_SCREENSHOT) await page.screenshot({path:process.env.VAPOURKIT_SMOKE_SCREENSHOT,fullPage:true});
 console.log('PASS: GPU recovery, both picker cancellations, selected filter commit, preview persistence, guided encoding, source track selection, inherited batch settings batch apply, curated catalog opt-in and confirmed installation; no browser exceptions.');

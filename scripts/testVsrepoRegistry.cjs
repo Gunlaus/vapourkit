@@ -22,7 +22,8 @@ const { pkg, chooseArtifact } = require('../dist/electron/filterRepositoryPolicy
     const entries = registry.packages.map(p => pkg.safeParse(p)).filter(p => p.success).map(p => p.data);
     assert(entries.length > 0, 'No recognizable package definitions');
     const native = entries.filter(p => p.type === 'VSPlugin' && chooseArtifact(p,'win32','x64'));
-    assert(native.length > 0, 'No explicit API4 Windows binaries recognized');
+    assert(native.some(p=>chooseArtifact(p,'win32','x64').api===3), 'No API3 Windows binaries recognized');
+    assert(native.some(p=>chooseArtifact(p,'win32','x64').api===4), 'No API4 Windows binaries recognized');
     console.log('PASS: official VSRepo archive, extraction, schema, and ' + native.length + ' compatible Windows native package definitions (' + entries.length + ' total)');
   } finally { await fs.rm(dir,{recursive:true,force:true}); }
 })().catch(error => { console.error(error); process.exitCode=1; });

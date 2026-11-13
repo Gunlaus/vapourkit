@@ -147,3 +147,32 @@ describe('a failing run', () => {
     expect(sent.filter(p => p.type === 'error')).toHaveLength(1);
   });
 });
+
+describe('binary handoff completion', () => {
+  it('does not report a partial encode as complete before the producer succeeds', async () => {
+    const { EventEmitter } = await import('events'); const { PassThrough } = await import('stream');
+    const fake = () => Object.assign(new EventEmitter(), { pid:1,killed:false,stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn() });
+    const producer=fake(), consumer=fake(); spawn.mockReset(); spawn.mockReturnValueOnce(producer).mockReturnValueOnce(consumer);
+    const executor=new UpscaleExecutor('/vs/vspipe','/py'); const messages: string[]=[];
+    (executor as unknown as {sendProgress:(p:{type:string})=>void}).sendProgress=p=>messages.push(p.type);
+    const run=executor.execute('/script','/out','/in',probes());
+    await vi.waitFor(()=>expect(spawn).toHaveBeenCalledTimes(2));
+    producer.stdout.write(Buffer.from('1a45dfa3','hex'));
+    consumer.emit('close',0);
+    expect(messages).not.toContain('complete');
+    producer.stderr.write('Python exception: model inference failed\n');
+    producer.emit('close',1);
+    await expect(run).rejects.toThrow('model inference failed');
+    expect(messages).not.toContain('complete');
+  });
+  it('reports stdout contamination as the upstream problem', async () => {
+    const { EventEmitter } = await import('events'); const { PassThrough } = await import('stream');
+    const fake = () => Object.assign(new EventEmitter(), { pid:1,killed:false,stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn() });
+    const producer=fake(), consumer=fake(); spawn.mockReset(); spawn.mockReturnValueOnce(producer).mockReturnValueOnce(consumer);
+    const executor=new UpscaleExecutor('/vs/vspipe','/py');
+    const run=executor.execute('/script','/out','/in',probes());
+    await vi.waitFor(()=>expect(spawn).toHaveBeenCalledTimes(2));
+    producer.stdout.write('[vk-build] compiling\n');
+    await expect(run).rejects.toThrow('diagnostics to stdout');
+  });
+});

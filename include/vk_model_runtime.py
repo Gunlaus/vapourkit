@@ -17,6 +17,16 @@ ADAPTER = 'rgb-window-v1'
 _IDENTITY = None
 
 
+def run_engine_builder(args):
+    """The parent stdout is a binary video pipe, never a diagnostic channel.
+
+    Use OS descriptors, not sys.stderr.fileno(): VSScript may replace the
+    Python streams with log adapters. Inheriting fd 1 corrupts Matroska even
+    when Python's sys.stdout has already been redirected.
+    """
+    return subprocess.run(args, check=True, timeout=1800, stdout=2, stderr=2)
+
+
 def temporal_window(clip, frames):
     if not isinstance(frames, int) or frames < 1 or frames % 2 == 0:
         raise RuntimeError('Centered temporal windows require a positive odd frame count.')
@@ -373,7 +383,7 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
             args = [python, '-u', builder, '--onnx=' + str(source), '--saveEngine=' + str(selected),
                     '--shapes=' + contract['inputs'][0]['name'] + ':' + 'x'.join(map(str, shape)), '--builderOptimizationLevel=3', '--vkAdapter=' + ADAPTER]
             if selected_precision != 'fp32': args.append('--' + selected_precision)
-            subprocess.run(args, check=True, timeout=1800)
+            run_engine_builder(args)
         found = json.loads(metadata.read_text()); details = found['bindings']
     if original == (clips[0].width, clips[0].height): _CHECKED[check_key] = (selected, details, cached_digest(selected))
     output = raw_model(clips, selected, streams, details)

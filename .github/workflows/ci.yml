@@ -43,9 +43,14 @@ jobs:
       - name: Test real Windows VSRepo plugin installation
         if: runner.os == 'Windows'
         run: python scripts/testVsrepoInstall.py
-      - name: Install model validation test dependencies
-        if: runner.os == 'Linux'
-        run: python -m pip install onnx onnxruntime numpy
+      - name: Install CPU pipeline and model test dependencies
+        run: python -m pip install onnx onnxruntime numpy vapoursynth==79 vapoursynth-bestsource==21.0 imageio-ffmpeg
+      - name: Configure the pinned VapourSynth runtime
+        run: python -m vapoursynth config
+      - name: Test noisy cold-build binary transport
+        run: python scripts/testRenderPipeline.py
+      - name: Test all benchmark stages
+        run: python scripts/testPipelineBenchmark.py
       - name: Test model contracts and engine publication
         if: runner.os == 'Linux'
         run: npm run test:models

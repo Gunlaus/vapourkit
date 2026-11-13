@@ -30,7 +30,7 @@ export function FilterRepositoryModal({ onClose, onInstalled }: { onClose: () =>
   const visible = entries.filter(p => (p.name + ' ' + p.description + ' ' + p.namespace).toLowerCase().includes(query.toLowerCase()));
   return <ModalShell title="Get more filters" onClose={onClose} closeDisabled={busy} layer={60} className="w-[800px] max-w-full max-h-[85vh] flex flex-col" panelProps={{ role: 'dialog', 'aria-label': 'Get more filters', 'aria-modal': true }}>
     <div className="p-4 space-y-3 border-b border-ink-800 text-xs">
-      <p>Browse the official VSRepo registry. Native packages need an explicit API4 release for this runtime. API3 or undeclared binaries are shown with an explanation.</p>
+      <p>Browse the official VSRepo registry. This R79 runtime supports API3 and API4. Missing native API metadata follows VSRepo’s API3 default; installation tests actual plugin loading.</p>
       <p className="text-ink-400">Installation adds templates for single-clip functions whose other arguments are optional. Other functions and Python scripts remain available through Custom/New Filter. New templates appear in this picker after installation.</p>
       <div className="flex gap-3"><input aria-label="Search repository filters" className="flex-1 bg-ink-900 border border-ink-700 rounded px-2 py-1" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search names, descriptions or namespaces…" /><button disabled={busy} onClick={() => void load(true)} className="text-accent-400 disabled:opacity-50">Refresh catalog</button></div>
       {message && <p role="status" className="whitespace-pre-wrap">{message}</p>}

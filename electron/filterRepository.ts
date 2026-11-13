@@ -77,7 +77,7 @@ export async function listRepository(refresh: boolean): Promise<RepositoryEntry[
     try { plan(p); } catch (error) { reason = String(error); }
     return { id: p.identifier, name: p.name, description: p.description, kind: p.type,
       version: chosen?.version ?? '', api: chosen?.api ?? p.api ?? null, namespace: p.namespace ?? p.modulename ?? '',
-      compatible: Boolean(chosen) && !reason, reason: reason || (chosen ? '' : 'No compatible artifact with an explicit API4 declaration for this platform.'),
+      compatible: Boolean(chosen) && !reason, reason: reason || (chosen ? '' : 'No supported API3/API4 artifact for this platform, or script metadata is incomplete.'),
       installed: installed.has(p.identifier) };
   });
 }

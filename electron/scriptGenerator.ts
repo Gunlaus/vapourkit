@@ -1,3 +1,4 @@
+import { rgbChainBoundaries } from './aiChainPlan';
 // electron/scriptGenerator.ts
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -118,6 +119,7 @@ export interface ScriptConfig {
   segment?: SegmentSelection;
   validationMode?: boolean; // If true, only process first 5 seconds for validation
   sourceFps?: number; // Source video FPS for validation frame calculation
+  optimizeAiChains?: boolean;
   generatePreviewOutputs?: boolean; // If true, add output nodes after each filter for vs-view
 }
 
@@ -443,6 +445,8 @@ export class VapourSynthScriptGenerator {
     // on to all of them would make every chain pay for a feature only some use.
     const wantedStages = this.referencedStageIds(enabledFilters);
     const emittedStages = new Set<string>();
+    const keepRgb = (config.optimizeAiChains ?? configManager.getPipelineSettings?.().optimizeAiChains ?? false)
+      ? rgbChainBoundaries([...sideChains.map(c => c.steps), layout.main.steps], wantedStages) : new Set<string>();
     if (wantedStages.size > 0 || sideChains.length > 0) {
       filterCode += '# Pictures kept for a step below that reads them\n';
       filterCode += `${STAGES} = {}\n\n`;
@@ -465,7 +469,7 @@ export class VapourSynthScriptGenerator {
         const filterUseFp32 = configManager.isModelFp32(filter.modelPath);
         const filterModelType = configManager.getModelType(filter.modelPath);
         const filterTemporalFrames = configManager.getTemporalFrames(filter.modelPath);
-        filterCode += this.generateAIModelCode(filter, provider, filterUseFp32, filterModelType, defaultMatrix, defaultPrimaries, defaultTransfer, filter.numStreams ?? config.numStreams, filterTemporalFrames);
+        filterCode += this.generateAIModelCode(filter, provider, filterUseFp32, filterModelType, defaultMatrix, defaultPrimaries, defaultTransfer, filter.numStreams ?? config.numStreams, filterTemporalFrames, keepRgb.has(filter.id));
         stageLabel = this.basename(filter.modelPath).replace(/\.(onnx|engine)$/i, '');
       } else if (filter.filterType === 'custom' && filter.code.trim()) {
         // Insert custom filter code
@@ -519,7 +523,8 @@ export class VapourSynthScriptGenerator {
       // Register an output after each stage that actually emitted code
       if (config.generatePreviewOutputs && stageLabel !== null) {
         previewOutputIndex++;
-        filterCode += `_vk_set_output(clip, ${previewOutputIndex}, ${pyString(`${previewOutputIndex}. ${stageLabel}`)})\n\n`;
+        const view = keepRgb.has(filter.id) ? 'core.resize.Point(clip, format=vs.YUV444P16, matrix_s="709", primaries_s="709", transfer_s="709")' : 'clip';
+        filterCode += `_vk_set_output(${view}, ${previewOutputIndex}, ${pyString(`${previewOutputIndex}. ${stageLabel}`)})\n\n`;
       }
     }
 
@@ -560,6 +565,8 @@ export class VapourSynthScriptGenerator {
     // Metadata/preview/encode setup remains lazy. Explicit validation executes one
     // frame through the whole graph, without seeking to the end of the source.
     if (config.validationMode) template += '\n# Validate the first output frame.\nclip.get_frame(0)\n';
+    // Script print() calls are diagnostics. Only vspipe may write media to fd 1.
+    template = 'import sys as _vk_sys\n_vk_sys.stdout = _vk_sys.stderr\n' + template;
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
     logger.info(`Generated script: ${tempScriptPath} (${Date.now() - startedAt} ms)`);
@@ -571,7 +578,7 @@ export class VapourSynthScriptGenerator {
    * (RGB conversion, temporal frame shifting, YUV restore) is backend-agnostic;
    * the model invocation itself comes from the filter's inference provider.
    */
-  private generateAIModelCode(filter: Filter, provider: InferenceProvider, useFp32: boolean, modelType: ModelType, defaultMatrix: string, defaultPrimaries: string, defaultTransfer: string, numStreams?: number, temporalFrames?: number): string {
+  private generateAIModelCode(filter: Filter, provider: InferenceProvider, useFp32: boolean, modelType: ModelType, defaultMatrix: string, defaultPrimaries: string, defaultTransfer: string, numStreams?: number, temporalFrames?: number, keepRgb = false): string {
     if (!filter.modelPath) return '';
 
     // Constant for the VapourSynth clip variable name
@@ -586,7 +593,10 @@ export class VapourSynthScriptGenerator {
     const rgbFormat = useFp32 ? 'vs.RGBS' : 'vs.RGBH';
     code += '# Convert to RGB format for upscaling\n';
     code += `if ${CLIP}.format.id != ${rgbFormat}:\n`;
-    code += `    ${CLIP} = core.resize.Bilinear(${CLIP}, format=${rgbFormat}, matrix_in_s="${defaultMatrix}", primaries_in_s="${defaultPrimaries}", transfer_in_s="${defaultTransfer}")\n`;
+    code += `    if ${CLIP}.format.color_family == vs.RGB:\n`;
+    code += `        ${CLIP} = core.resize.Point(${CLIP}, format=${rgbFormat})\n`;
+    code += '    else:\n';
+    code += `        ${CLIP} = core.resize.Bilinear(${CLIP}, format=${rgbFormat}, matrix_in_s="${defaultMatrix}", primaries_in_s="${defaultPrimaries}", transfer_in_s="${defaultTransfer}")\n`;
     code += `${CLIP} = core.std.Expr(${CLIP}, expr=['x 0 max 1 min'])\n`;
 
     // Determine num_streams value (default to 2 if not specified)
@@ -610,6 +620,9 @@ export class VapourSynthScriptGenerator {
       code += provider.modelCallCode(CLIP, modelFile, callOptions);
       code += '\n';
     }
+
+    // Retain floating RGB only across an explicit compatible AI boundary.
+    if (keepRgb) return code + '# Keep RGB for the next adjacent AI model\n\n';
 
     // Convert to YUV for filter compatibility
     code += '# Convert to YUV for filter compatibility\n';

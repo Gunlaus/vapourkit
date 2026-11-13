@@ -124,3 +124,17 @@ describe('selectable source tracks and preview toggle', () => {
     expect(args).not.toContain('-movflags');
   });
 });
+
+describe('bounded execution preferences', () => {
+  it('uses explicit requests only when they are in the supported range', () => {
+    expect(vspipeArgs('s.vpy',4)).toContain('--requests');
+    expect(vspipeArgs('s.vpy',0)).not.toContain('--requests');
+    expect(vspipeArgs('s.vpy',99)).not.toContain('--requests');
+  });
+  it('changes preview cost without altering the main video arguments', () => {
+    const args=build({previewHeight:360,previewFps:0.5});
+    expect(args).toContain('fps=0.5,scale=-2:360');
+    expect(args.slice(0,args.indexOf('C:/out.mp4'))).toEqual(build().slice(0,build().indexOf('C:/out.mp4')));
+    expect(build({previewEnabled:false,previewHeight:360})).not.toContain('mjpeg');
+  });
+});

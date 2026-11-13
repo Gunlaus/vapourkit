@@ -26,4 +26,13 @@ describe.skipIf(!environment.python)('VSRepo real native plugin installation', (
     const loaded = await listRepository(false);
     expect(loaded.find(p => p.id === target!.id)?.installed).toBe(true);
   }, 180000);
+  it('loads the legacy API3 CTMF plugin on the pinned R79 core', async () => {
+    const rows = await listRepository(true);
+    const target = rows.find(p => p.namespace === 'ctmf' && p.compatible && !p.installed);
+    expect(target).toBeDefined();
+    expect(target!.api).toBe(3);
+    await installRepositoryPackage(target!.id);
+    expect((await listRepository(false)).find(p => p.id === target!.id)?.installed).toBe(true);
+  }, 180000);
+
 });

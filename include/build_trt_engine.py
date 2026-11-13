@@ -1713,4 +1713,8 @@ def main(argv):
 
 
 if __name__ == '__main__':
+    # This executable is also launched by vs-mlrt shims while vspipe owns
+    # stdout. Keep Python and native-library build messages off the video pipe.
+    sys.stdout.flush()
+    os.dup2(2, 1)
     sys.exit(main(sys.argv[1:]))

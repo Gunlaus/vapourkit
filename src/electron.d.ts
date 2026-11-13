@@ -27,6 +27,9 @@ export interface RocmSettingResult {
 }
 
 export interface ElectronAPI {
+  exportPipelineBenchmark: (request: { videoPath: string; defaultBackend: string; filters: Filter[]; numStreams: number; segment?: SegmentSelection }) => Promise<{ cancelled: boolean; directory?: string; message?: string }>;
+  getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
+  setPipelineSettings: (settings: import('../electron/pipelineSettings').PipelineSettings) => Promise<void>;
   listFilterRepository: (refresh: boolean) => Promise<import('../electron/filterRepositoryTypes').RepositoryEntry[]>;
   installRepositoryFilter: (id: string) => Promise<{ message: string }>;
   // Dependency management

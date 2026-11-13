@@ -1,6 +1,7 @@
+import { timecodesPathFor } from './sourceTiming';
 import { nvencEncoderOf, checkNvencEncoder } from './encodingSupport';
 import { setPreviewEnabled } from './previewSettings';
-import { ipcMain, BrowserWindow, shell, MessageChannelMain, type MessagePortMain } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog, MessageChannelMain, type MessagePortMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
@@ -249,6 +250,33 @@ export function registerVideoHandlers(
       logger.error('Error reading video file:', error);
       throw error;
     }
+  });
+
+  handleValidated('export-pipeline-benchmark', z.object({
+    videoPath: z.string().min(1), defaultBackend: z.string(),
+    filters: z.array(z.any()).max(500), numStreams: z.number().int().min(1).max(16),
+    segment: z.object({ enabled: z.boolean(), startFrame: z.number().int().nonnegative(), endFrame: z.number().int() }).optional(),
+  }), async request => {
+    const chosen = await dialog.showOpenDialog({ title: 'Choose a folder for the benchmark bundle', properties: ['openDirectory', 'createDirectory'] });
+    if (chosen.canceled || !chosen.filePaths[0]) return { cancelled: true };
+    const root = await fs.mkdtemp(path.join(chosen.filePaths[0], 'vapourkit-benchmark-'));
+    const generated: string[] = [];
+    try {
+      for (const [name, optimizeAiChains] of [['workflow.vpy', false], ['workflow-rgb.vpy', true]] as const) {
+        const file = await scriptGenerator.generateScript({ ...buildScriptConfig(request), optimizeAiChains });
+        generated.push(file);
+        let text = await fs.readFile(file, 'utf8');
+        text = text.split(timecodesPathFor(file).replace(/\\/g, '/')).join(path.join(root, name + '.timecodes.txt').replace(/\\/g, '/'));
+        await fs.writeFile(path.join(root, name), text, 'utf8');
+      }
+      const input = JSON.stringify(request.videoPath.replace(/\\/g, '/'));
+      const trim = request.segment?.enabled ? `clip=core.std.Trim(clip,first=${request.segment.startFrame}${request.segment.endFrame >= 0 ? `,last=${request.segment.endFrame - 1}` : ''})\n` : '';
+      await fs.writeFile(path.join(root, 'source.vpy'), `import sys\nsys.stdout=sys.stderr\nimport vapoursynth as vs\ncore=vs.core\nclip=core.bs.VideoSource(source=${input},cachemode=3)\n${trim}clip.set_output()\n`, 'utf8');
+      const encoder = await FFmpegSettingsManager.loadFFmpegConfig(configManager);
+      await fs.writeJson(path.join(root, 'benchmark.json'), { schema: 1, sourceScript: 'source.vpy', scripts: { legacy: 'workflow.vpy', rgb: 'workflow-rgb.vpy' }, vspipe: PATHS.VSPIPE, ffmpeg: FFmpegManager.getFFmpegPath(), encoderArgs: encoder.videoArgs }, { spaces: 2 });
+      return { cancelled: false, directory: root, message: `Benchmark bundle saved to ${root}. Run scripts/benchmarkPipeline.py --bundle <folder>/benchmark.json --output report.json from the repository.` };
+    } catch (error) { await fs.remove(root); throw error; }
+    finally { for (const file of generated) await scriptGenerator.cleanupScript(file); }
   });
 
   ipcMain.handle('get-output-resolution', async (

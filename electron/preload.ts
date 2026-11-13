@@ -2,6 +2,9 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  exportPipelineBenchmark: (request: unknown) => ipcRenderer.invoke('export-pipeline-benchmark', request),
+  getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  setPipelineSettings: (settings: import('./pipelineSettings').PipelineSettings) => ipcRenderer.invoke('set-pipeline-settings', settings),
   // Dependency management
   platform: process.platform,
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),

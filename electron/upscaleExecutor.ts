@@ -1,3 +1,4 @@
+import { MatroskaPipe } from './matroskaPipe';
 import { isPreviewEnabled } from './previewSettings';
 // electron/upscaleExecutor.ts
 import { spawn, ChildProcess } from 'child_process';
@@ -68,6 +69,7 @@ export class UpscaleExecutor {
   private stoppedByApp = new WeakSet<ChildProcess>();
   private gpuPollInterval: ReturnType<typeof setInterval> | null = null;
   private latestGpuStats: GpuStats | null = null;
+  private runStartedAt = 0;
 
   /**
    * Optional extra sink for engine-build status (queue item logs). The renderer
@@ -163,6 +165,7 @@ export class UpscaleExecutor {
     // A stop during the caller's graph probe surfaces as a failed probe, so
     // the stop is checked first.
     this.throwIfStopped();
+    this.runStartedAt = Date.now();
     const outputInfo = probes.output;
     const totalFrames = outputInfo.frames;
     this.logExecutionStart(scriptPath, inputPath, outputPath, totalFrames);
@@ -211,8 +214,8 @@ export class UpscaleExecutor {
       }
       this.ffmpegProcess = ffmpeg;
 
-      this.setupProcessPiping(vspipe, ffmpeg);
-      this.setupProcessMonitoring(vspipe, ffmpeg, totalFrames, outputPath, resolve, reject, benchmarkMode);
+      const videoPipe = this.setupProcessPiping(vspipe, ffmpeg);
+      this.setupProcessMonitoring(vspipe, ffmpeg, totalFrames, outputPath, resolve, reject, benchmarkMode, videoPipe);
     });
   }
 
@@ -295,7 +298,7 @@ export class UpscaleExecutor {
 
   private spawnVspipe(scriptPath: string, env: NodeJS.ProcessEnv) {
     logger.upscale('Spawning vspipe process');
-    return spawn(this.vspipePath, vspipeArgs(scriptPath), createWorkloadSpawnOptions({
+    return spawn(this.vspipePath, vspipeArgs(scriptPath, configManager.getPipelineSettings?.().requests), createWorkloadSpawnOptions({
       stdio: ['ignore', 'pipe', 'pipe'],
       env: env,
       cwd: this.vsPath
@@ -346,7 +349,7 @@ export class UpscaleExecutor {
     if (ffmpegConfig.copyMetadata) logger.upscale('Copying metadata from input');
     const movflags = movflagsFor(outputPath, ffmpegConfig);
     if (movflags.length > 0) logger.upscale(`Adding movflags: ${movflags.join(',')}`);
-    return buildPipeFFmpegArgs({ inputPath, outputPath, metadata, outputInfo, ffmpegConfig, audioTrim, previewEnabled: isPreviewEnabled() });
+    return buildPipeFFmpegArgs({ inputPath, outputPath, metadata, outputInfo, ffmpegConfig, audioTrim, previewEnabled: isPreviewEnabled(), previewHeight: configManager.getPipelineSettings?.().previewHeight, previewFps: configManager.getPipelineSettings?.().previewFps });
   }
 
   private spawnFFmpeg(ffmpegArgs: string[]) {
@@ -363,7 +366,7 @@ export class UpscaleExecutor {
     }));
   }
 
-  private setupProcessPiping(vspipe: ChildProcess, ffmpeg: ChildProcess) {
+  private setupProcessPiping(vspipe: ChildProcess, ffmpeg: ChildProcess): MatroskaPipe | null {
     // Set binary encoding and add error handler
     if (ffmpeg.stdin) {
       ffmpeg.stdin.setDefaultEncoding('binary');
@@ -377,12 +380,15 @@ export class UpscaleExecutor {
 
     // Pipe vspipe output directly to ffmpeg
     if (vspipe.stdout && ffmpeg.stdin) {
-      vspipe.stdout.pipe(ffmpeg.stdin);
+      const videoPipe = new MatroskaPipe();
+      vspipe.stdout.pipe(videoPipe).pipe(ffmpeg.stdin);
       
       vspipe.stdout.on('error', (error) => {
         logger.error('vspipe stdout error:', error);
       });
+      return videoPipe;
     }
+    return null;
   }
 
   private setupProcessMonitoring(
@@ -392,7 +398,8 @@ export class UpscaleExecutor {
     outputPath: string,
     resolve: () => void,
     reject: (reason?: any) => void,
-    benchmarkMode: boolean = false
+    benchmarkMode: boolean = false,
+    videoPipe: MatroskaPipe | null = null,
   ) {
     // Start GPU stats polling
     this.startGpuPolling();
@@ -501,6 +508,7 @@ export class UpscaleExecutor {
         const ffmpegMatch = output.match(/frame=\s*(\d+)\s+fps=\s*([\d.]+)/i);
         
         if (ffmpegMatch) {
+          if (firstProgress) { firstProgress = false; logger.upscale(`[pipeline] First encoded progress: ${Date.now() - this.runStartedAt} ms`); }
           currentFrame = parseInt(ffmpegMatch[1], 10);
           currentFPS = parseFloat(ffmpegMatch[2]);
 
@@ -544,6 +552,7 @@ export class UpscaleExecutor {
 
     // The first failure is the one reported; the other process stopping
     // because of it is not a second error.
+    let firstProgress = true;
     let failed = false;
     const fail = (title: string, errorMsg: string) => {
       if (failed) return;
@@ -559,6 +568,46 @@ export class UpscaleExecutor {
       });
       reject(new ReportedRunError(errorMsg));
     };
+
+    let vspipeSucceeded = false;
+    let ffmpegSucceeded = false;
+    let completed = false;
+    const complete = () => {
+      if (failed || completed || !vspipeSucceeded || !ffmpegSucceeded) return;
+      completed = true;
+      logger.upscale(`[pipeline] Encode run: ${Date.now() - this.runStartedAt} ms for ${totalFrames} frames`);
+      if (benchmarkMode) {
+        logger.upscale('Benchmark completed successfully!');
+      } else {
+        logger.upscale('Processing completed successfully!');
+        logger.upscale(`Output saved to: ${outputPath}`);
+      }
+      logger.separator();
+
+      this.sendProgress({
+        type: 'complete',
+        currentFrame: totalFrames,
+        totalFrames,
+        fps: currentFPS,
+        percentage: 100,
+        message: 'Processing completed successfully!'
+      });
+      resolve();
+    };
+    videoPipe?.once('data', () => logger.upscale(`[pipeline] First Matroska bytes: ${Date.now() - this.runStartedAt} ms`));
+    videoPipe?.on('error', error => {
+      if (this.isCanceling || failed) return;
+      buildTracker.reset();
+      this.stopGpuPolling();
+      const detail = vspipeStderrBuffer.trim().slice(-5000);
+      fail('VapourSynth Output Error', error.message + (detail ? '\n\n' + detail : ''));
+      for (const child of [vspipe, ffmpeg]) {
+        this.stoppedByApp.add(child);
+        terminateProcessTree(child);
+      }
+      vspipe.stdout?.unpipe(videoPipe);
+      ffmpeg.stdin?.end();
+    });
 
     vspipe.on('error', (error) => {
       buildTracker.reset();
@@ -581,10 +630,13 @@ export class UpscaleExecutor {
       // run; a kill stops ffmpeg too, whose close settles it the same way.
       if (this.stoppedByApp.has(vspipe)) {
         logger.upscale('vspipe was stopped by the app; not an error');
+        vspipeSucceeded = true;
+        complete();
         return;
       }
 
-      if (code !== 0 && code !== null) {
+      if (code === 0) { vspipeSucceeded = true; complete(); }
+      if (code !== 0) {
         // ffmpeg has no more frames coming. The app stops it, so its exit
         // is not reported as a second error.
         if (!ffmpeg.killed) {
@@ -612,23 +664,8 @@ export class UpscaleExecutor {
       }
 
       if (code === 0) {
-        if (benchmarkMode) {
-          logger.upscale('Benchmark completed successfully!');
-        } else {
-          logger.upscale('Processing completed successfully!');
-          logger.upscale(`Output saved to: ${outputPath}`);
-        }
-        logger.separator();
-        
-        this.sendProgress({
-          type: 'complete',
-          currentFrame: totalFrames,
-          totalFrames,
-          fps: currentFPS,
-          percentage: 100,
-          message: 'Processing completed successfully!'
-        });
-        resolve();
+        ffmpegSucceeded = true;
+        complete();
       } else {
         logger.separator();
 
@@ -640,6 +677,11 @@ export class UpscaleExecutor {
           this.process = null;
         }
 
+        if (vspipeStderrBuffer.includes('Traceback') || vspipeStderrBuffer.includes('Python exception:')) {
+          const upstream = ErrorMessageHandler.extractErrorMessage(vspipeStderrBuffer);
+          fail('VapourSynth Error', ErrorMessageHandler.formatUserErrorMessage('VapourSynth Error', upstream));
+          return;
+        }
         const actualError = ErrorMessageHandler.extractErrorMessage(ffmpegStderrBuffer);
         fail('FFmpeg Error', ErrorMessageHandler.formatUserErrorMessage('FFmpeg Error', actualError));
       }

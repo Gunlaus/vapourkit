@@ -1327,6 +1327,13 @@ function App() {
 
       {/* Modals */}
       <AppModals
+        onExportBenchmark={videoInfo ? async () => {
+          try {
+            await workflow.whenConfigSaved();
+            const result = await window.electronAPI.exportPipelineBenchmark({ videoPath: videoInfo.path, filters, defaultBackend, numStreams, segment });
+            if (!result.cancelled) notify.success('Benchmark exported', result.message ?? result.directory ?? 'Saved');
+          } catch (error) { notify.error('Benchmark export failed', getErrorMessage(error)); }
+        } : undefined}
         showImportModal={showImportModal}
         onCloseImportModal={() => closeModalWithFocusRestore(() => setShowImportModal(false))}
         isImporting={isImporting}

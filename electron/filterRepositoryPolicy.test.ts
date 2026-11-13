@@ -4,10 +4,12 @@ import { pkg, safePath, chooseArtifact } from './filterRepositoryPolicy';
 const binary = (api?: number) => ({ url: 'https://github.com/test/repo/releases/download/1/plugin.zip', ...(api === undefined ? {} : { api }), files: { 'plugin.dll': ['x64/plugin.dll', 'a'.repeat(64)] } });
 const model = (asset: unknown) => pkg.parse({ name: 'Plugin', identifier: 'test.plugin', type: 'VSPlugin', description: 'test', releases: [{ version: '1', win64: asset }] });
 describe('VSRepo compatibility', () => {
-  it('requires explicit API4 for the R79 native runtime', () => {
-    expect(chooseArtifact(model(binary(3)), 'win32', 'x64')).toBeNull();
-    expect(chooseArtifact(model(binary()), 'win32', 'x64')).toBeNull();
+  it('supports API3 and API4 on R79, including the VSRepo API3 default', () => {
+    expect(chooseArtifact(model(binary(3)), 'win32', 'x64')?.api).toBe(3);
+    expect(chooseArtifact(model(binary()), 'win32', 'x64')?.api).toBe(3);
     expect(chooseArtifact(model(binary(4)), 'win32', 'x64')?.api).toBe(4);
+    expect(chooseArtifact(model(binary(5)), 'win32', 'x64')).toBeNull();
+    expect(chooseArtifact(model(binary(3)), 'win32', 'x64', 80)).toBeNull();
   });
   it('does not offer Windows binaries to Linux or other architectures', () => {
     expect(chooseArtifact(model(binary(4)), 'linux', 'x64')).toBeNull();

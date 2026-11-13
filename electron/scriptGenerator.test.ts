@@ -826,3 +826,20 @@ describe('startup evaluation cost', () => {
     await fs.remove(scriptPath);
   });
 });
+
+describe('opt-in AI chaining', () => {
+  it('keeps adjacent AI work in RGB but preserves preview taps', async () => {
+    const generator = new VapourSynthScriptGenerator('win32');
+    const file = await generator.generateScript({ inputVideo:'C:/input.mkv', filters:[aiFilter(0,'C:/a.engine'),aiFilter(1,'C:/b.engine')], optimizeAiChains:true, generatePreviewOutputs:true });
+    const text=await fs.readFile(file,'utf8'); await fs.remove(file);
+    expect(text).toContain('# Keep RGB for the next adjacent AI model');
+    expect(text).toContain('_vk_set_output(core.resize.Point(clip, format=vs.YUV444P16');
+    expect((text.match(/# Convert to YUV for filter compatibility/g)||[]).length).toBe(1);
+  });
+  it('leaves legacy conversion behavior unchanged by default', async () => {
+    const text=await generate([aiFilter(0,'C:/a.engine'),aiFilter(1,'C:/b.engine')],false);
+    expect(text).not.toContain('# Keep RGB for');
+    expect((text.match(/# Convert to YUV for filter compatibility/g)||[]).length).toBe(2);
+    expect(text).toContain('_vk_sys.stdout = _vk_sys.stderr');
+  });
+});
