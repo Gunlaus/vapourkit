@@ -29,7 +29,7 @@ def build(opts):
     pathlib.Path(opts['save_engine']).write_bytes(b'test-engine')
     return 0
 scope['main'].__globals__['build'] = build
-runtime.validate_engine = lambda *args: {'schema': 1, 'validation': 'stubbed-gpu'}
+runtime.validate_engine = lambda *args: {'schema': 1, 'validation': {'execution': 'stubbed-gpu'}}
 assert scope['main'](['--onnx=' + source, '--saveEngine=' + target]) == 0
 assert pathlib.Path(target).read_bytes() == b'test-engine'
 assert json.loads(pathlib.Path(target + '.json').read_text())['schema'] == 1
