@@ -56,7 +56,7 @@ export async function listRepository(refresh: boolean): Promise<RepositoryEntry[
         const archive = path.join(stage, 'registry.zip');
         await downloadToFile(REGISTRY, archive, { label: 'VapourSynth filter catalog', retries: 1 });
         const seven = (await import('7zip-min')).default;
-        await seven.unpackSome(archive, ['vspackages3.json'], stage);
+        await seven.cmd(['x', '-y', '-o' + stage, archive, 'vspackages3.json']);
         data = await fs.readJson(path.join(stage, 'vspackages3.json'));
       } finally { await fs.remove(stage); }
     }
@@ -111,7 +111,7 @@ export async function installRepositoryPackage(id: string): Promise<{ message: s
         const found = listing.find(item => item.name.replace(/\\/g, '/') === member);
         if (!found || !found.size || Number(found.size) > 512 * 1024 * 1024) throw new Error('Invalid or oversized archive member: ' + member);
       }
-      await seven.unpackSome(archive, entries.map(([, [member]]) => member), folder);
+      await seven.cmd(['x', '-y', '-o' + folder, archive, ...entries.map(([, [member]]) => member)]);
       for (const [target, [member, sha]] of entries) {
         const source = path.join(folder, member);
         if (!(await fs.realpath(source)).startsWith(await fs.realpath(folder) + path.sep) || !(await fs.lstat(source)).isFile() || await fileDigest(source) !== sha) throw new Error('Checksum/type mismatch: ' + target);
