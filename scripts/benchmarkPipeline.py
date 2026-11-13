@@ -153,7 +153,8 @@ def main():
     if not isinstance(encoder,list) or not all(isinstance(a,str) for a in encoder): parser.error('Encoder arguments must be a JSON string array')
     encoder, removed = video_only_args(encoder)
     report={'schema':1,'platform':platform.platform(),'python':sys.version,'transport':'Node MatroskaPipe relay' if args.node else 'direct OS pipe (excludes Node/UI overhead)',
-            'script':str(args.script.resolve()),'variant':args.variant,'runs':args.runs,'encoderArgs':encoder,'omittedNonVideoArgs':removed,'preview':args.preview,'cases':[],
+            'script':str(args.script.resolve()),'variant':args.variant,'runs':args.runs,'encoderArgs':encoder,'omittedNonVideoArgs':removed,
+            'preview':args.preview,'previewHeight':args.preview_height,'previewFps':args.preview_fps,'cases':[],
             'notes':['Decode-only includes source loading. Filter stage includes decoding. Do not subtract parallel stage timings as isolated costs.',
                      'Encoder-only includes reading/demuxing a warm uncompressed snapshot. Combined stage includes fresh process/graph startup.',
                      'Warmup and snapshot preparation are excluded from measured medians; startup still included in each measured run.']}
@@ -179,7 +180,7 @@ def main():
             run(base+['-c','mkv',str(workflow),str(snapshot)],args.timeout)
             def consumer(input):
                 command=[args.ffmpeg,'-hide_banner','-loglevel','error','-nostdin','-f','matroska','-i',input,'-map','0:v:0','-an','-sn','-frames:v',str(count),*encoder,'-fps_mode','passthrough','-f','null','-']
-                if args.preview: command+=['-map','0:v:0','-vf',f'fps={args.preview_fps},scale=-2:{args.preview_height//2*2}','-c:v','mjpeg','-q:v','1','-f','image2pipe','pipe:1']
+                if args.preview: command+=['-map','0:v:0','-vf',f'fps={args.preview_fps},scale=-2:{args.preview_height//2*2}','-c:v','mjpeg','-pix_fmt','yuvj422p','-q:v','1','-f','image2pipe','pipe:1']
                 return command
             case={'requests':requests,'threads':threads,'streams':streams,'frames':count,'output':data,'warmupMs':(time.perf_counter()-warm)*1000,'stages':{}}
             for name in ('decode','filter','encode','combined'):
