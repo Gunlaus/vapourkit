@@ -346,6 +346,7 @@ export class VapourSynthScriptGenerator {
   }
 
   async generateScript(config: ScriptConfig): Promise<string> {
+    const startedAt = Date.now();
     await this.syncRuntime();
     const templatePath = this.getTemplatePath();
     let template = await fs.readFile(templatePath, 'utf-8');
@@ -561,7 +562,7 @@ export class VapourSynthScriptGenerator {
     if (config.validationMode) template += '\n# Validate the first output frame.\nclip.get_frame(0)\n';
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
-    logger.info(`Generated script: ${tempScriptPath}`);
+    logger.info(`Generated script: ${tempScriptPath} (${Date.now() - startedAt} ms)`);
     return tempScriptPath;
   }
 

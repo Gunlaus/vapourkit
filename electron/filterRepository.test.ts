@@ -68,4 +68,16 @@ describe('staged VSRepo installation', () => {
     await expect(service.installRepositoryPackage('test.newblur')).rejects.toThrow('dependency is not in VSRepo');
     expect(mocks.download.mock.calls.length).toBe(before);
   });
+  it('installs direct Python script assets with the same checksum and load checks', async () => {
+    const script = { name:'New script', identifier:'newscript', type:'PyScript', modulename:'newscript', releases:[{version:'1',script:{url:'https://raw.githubusercontent.com/test/repo/commit/newscript.py',files:{'newscript.py':['newscript.py',sha]}}}] };
+    registry = { 'file-format':3, packages:[script] };
+    mocks.download.mockImplementation(async (url,file) => { await fs.outputFile(file, url.endsWith('newscript.py') ? content : Buffer.from('archive')); });
+    mocks.exec.mockImplementation((_python,_args,_options,done) => done(null,'[]',''));
+    const service=await import('./filterRepository');
+    await service.listRepository(true);
+    await service.installRepositoryPackage('newscript');
+    expect(await fs.readFile(path.join(root,'scripts','newscript.py'))).toEqual(content);
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
+
 });

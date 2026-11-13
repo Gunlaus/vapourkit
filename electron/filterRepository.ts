@@ -106,12 +106,19 @@ export async function installRepositoryPackage(id: string): Promise<{ message: s
       for (const [target, [member]] of entries) { safePath.parse(target); safePath.parse(member); }
       const seven = (await import('7zip-min')).default;
       // Select exact registry members, never extract an entire third-party archive.
-      const listing = await seven.list(archive);
-      for (const [, [member]] of entries) {
-        const found = listing.find(item => item.name.replace(/\\/g, '/') === member);
-        if (!found || !found.size || Number(found.size) > 512 * 1024 * 1024) throw new Error('Invalid or oversized archive member: ' + member);
+      const direct = entries.length === 1 && decodeURIComponent(path.posix.basename(url.pathname)) === path.posix.basename(entries[0][1][0]);
+      if (direct) {
+        const destination = path.join(folder, entries[0][1][0]);
+        await fs.ensureDir(path.dirname(destination));
+        await fs.copy(archive, destination);
+      } else {
+        const listing = await seven.list(archive);
+        for (const [, [member]] of entries) {
+          const found = listing.find(item => item.name.replace(/\\/g, '/') === member);
+          if (!found || !found.size || Number(found.size) > 512 * 1024 * 1024) throw new Error('Invalid or oversized archive member: ' + member);
+        }
+        await seven.cmd(['x', '-y', '-o' + folder, archive, ...entries.map(([, [member]]) => member)]);
       }
-      await seven.cmd(['x', '-y', '-o' + folder, archive, ...entries.map(([, [member]]) => member)]);
       for (const [target, [member, sha]] of entries) {
         const source = path.join(folder, member);
         if (!(await fs.realpath(source)).startsWith(await fs.realpath(folder) + path.sep) || !(await fs.lstat(source)).isFile() || await fileDigest(source) !== sha) throw new Error('Checksum/type mismatch: ' + target);
@@ -162,7 +169,7 @@ print(json.dumps(result))`, [JSON.stringify({ native, folders: files.map(f => pa
       }
     }
     for (const p of work) installed.add(p.identifier);
-    return { message: 'Installed ' + work.map(p => p.name).join(', ') + '. Added ' + templates + ' single-clip filter templates. Reopen the filter picker to refresh; close/reopen any preview to load the new plugins. Other functions/scripts can be used in a custom filter.' };
+    return { message: 'Installed ' + work.map(p => p.name).join(', ') + '. Added ' + templates + ' single-clip filter templates. Filter templates refreshed; close/reopen any preview to load the new plugins. Other functions/scripts can be used in a custom filter.' };
   } catch (error) {
     const manager = new TemplateManager();
     for (const name of templateNames) await manager.deleteTemplate(name).catch(() => {});

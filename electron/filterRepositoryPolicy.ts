@@ -9,6 +9,7 @@ export const pkg = z.object({
 export type Package = z.infer<typeof pkg>;
 export type Artifact = z.infer<typeof artifact>;
 export function chooseArtifact(p: Package, platform = process.platform, arch = process.arch): { version: string; asset: Artifact; api: number | null } | null {
+  if (p.type === 'PyScript' && (!p.modulename || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(p.modulename))) return null;
   const target = p.type === 'PyScript' ? 'script' : arch !== 'x64' ? '' : platform === 'win32' ? 'win64' : platform === 'linux' ? 'linux-glibc-x86_64' : '';
   for (const release of p.releases) {
     const parsed = artifact.safeParse(release[target]);

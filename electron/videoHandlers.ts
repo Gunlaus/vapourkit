@@ -639,8 +639,10 @@ export function registerVideoHandlers(
       });
       await session.start();
       let outputs;
+      const openStartedAt = Date.now();
       try {
         outputs = await session.open(scriptPath, PREVIEW_CACHE_MB);
+        logger.info(`[startup] In-app preview graph open: ${Date.now() - openStartedAt} ms`);
       } catch (error) {
         // A core too new for the installed plugins only says so on stderr;
         // the traceback it leads to names the wrong cause.
