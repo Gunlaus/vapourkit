@@ -470,7 +470,7 @@ def blacklist_path_for(opts, fingerprint, precision):
     """
     cache_dir = Path(opts['save_engine']).parent / '.vapourkit-trt-blacklists'
     from vk_model_runtime import runtime_identity
-    runtime_key = hashlib.sha256(json.dumps(runtime_identity(), sort_keys=True).encode()).hexdigest()[:16]
+    runtime_key = hashlib.sha256(json.dumps([runtime_identity(), {'noTF32': bool(opts.get('no_tf32'))}], sort_keys=True).encode()).hexdigest()[:16]
     return cache_dir / f'{fingerprint}_{precision}_{runtime_key}.txt'
 
 
@@ -1403,7 +1403,7 @@ def build_low_precision_engine(opts, trt):
         save_engine(opts['save_engine'], engine_bytes)
         _write_timing_cache(opts['timing_cache_file'], updated_cache)
         print(f'Final build completed in {format_seconds(elapsed)}.', flush=True)
-        report_progress(100)
+        report_progress(90)
 
     if cached_blacklist is not None:
         report_status('Using previously learned TensorRT compatibility fallbacks...')
@@ -1613,7 +1613,7 @@ def build_direct_engine(opts, trt, legacy_precision_flags):
     save_engine(opts['save_engine'], engine_bytes)
     if timing_cache is not None:
         _write_timing_cache(opts['timing_cache_file'], bytes(timing_cache.serialize()))
-    report_progress(100)
+    report_progress(90)
     return 0
 
 
@@ -1632,6 +1632,51 @@ def build(opts):
     if not legacy_precision_flags and (opts['fp16'] or opts['bf16']):
         return build_low_precision_engine(opts, trt)
     return build_direct_engine(opts, trt, legacy_precision_flags)
+
+
+def build_validated_candidate(opts, report_path):
+    """One conservative accuracy retry; layout/NaN errors never enter it."""
+    import gc
+    import tensorrt as trt
+    from vk_model_runtime import validate_engine, EngineValidationError, graph_contract
+    attempts = []
+    def write_report(status):
+        try: atomic_write_bytes(report_path, json.dumps({'schema': 1, 'source': opts['onnx'], 'status': status, 'attempts': attempts}, indent=2).encode())
+        except OSError as error: print('Warning: could not save validation report: ' + str(error), file=sys.stderr)
+    for attempt in range(2):
+        status = build(opts)
+        if status:
+            attempts.append({'noTF32': bool(opts['no_tf32']), 'status': 'build-failed', 'exitCode': status})
+            write_report('failed')
+            return status, None
+        gc.collect()
+        report_status('Validating engine through VapourSynth inference...')
+        try:
+            manifest = validate_engine(opts['save_engine'], opts)
+        except EngineValidationError as error:
+            attempts.append({'noTF32': bool(opts['no_tf32']), 'status': 'failed', 'kind': error.kind, 'metrics': error.report})
+            write_report('failed')
+            may_retry = (attempt == 0 and error.kind == 'accuracy-mismatch' and not opts['no_tf32']
+                         and hasattr(getattr(trt, 'BuilderFlag', object), 'TF32'))
+            if may_retry:
+                contract = graph_contract(opts['onnx'])
+                may_retry = contract['inputs'][0]['dtype'] == 1 or 1 in contract.get('weightTypes', [])
+            if not may_retry: raise
+            print('Accuracy mismatch: ' + json.dumps(error.report, sort_keys=True), file=sys.stderr, flush=True)
+            report_status('Accuracy retry 1/1: disabling TF32 for FP32 operations; FP16 graph types and validation tolerances stay unchanged.')
+            opts['no_tf32'] = True
+            opts.pop('_pending_blacklist', None)
+            continue
+        except Exception as error:
+            attempts.append({'noTF32': bool(opts['no_tf32']), 'status': 'failed', 'kind': 'validation-execution-error', 'message': str(error)[:2000]})
+            write_report('failed')
+            raise
+        attempts.append({'noTF32': bool(opts['no_tf32']), 'status': 'passed'})
+        manifest.setdefault('validation', {})['buildAttempts'] = attempts
+        manifest['validation']['noTF32'] = bool(opts['no_tf32'])
+        write_report('passed')
+        return 0, manifest
+    raise RuntimeError('Engine validation retry limit reached')
 
 
 def main(argv):
@@ -1669,13 +1714,8 @@ def main(argv):
         candidate = target + '.candidate-' + str(os.getpid())
         opts['save_engine'] = candidate
         try:
-            status = build(opts)
+            status, manifest = build_validated_candidate(opts, target + '.validation-report.json')
             if status: return status
-            import gc
-            gc.collect()
-            from vk_model_runtime import validate_engine
-            report_status('Validating engine through VapourSynth inference...')
-            manifest = validate_engine(candidate, opts)
             # The working engine remains untouched until real frame inference passes.
             metadata_candidate = candidate + '.json'
             atomic_write_bytes(metadata_candidate, json.dumps(manifest, indent=2).encode())
@@ -1701,12 +1741,17 @@ def main(argv):
                 file, content = opts['_pending_blacklist']
                 try: atomic_write_bytes(file, content)
                 except OSError as error: print('Warning: could not save precision cache: ' + str(error), file=sys.stderr)
+            report_progress(100)
             return 0
         finally:
             for file in (candidate, candidate + '.json'):
                 if os.path.exists(file): os.remove(file)
     except Exception as error:
         print(f'Error: TensorRT engine build failed: {error}', file=sys.stderr)
+        if 'target' in locals():
+            print('The candidate was rejected; the existing engine was kept.', file=sys.stderr)
+            if os.path.exists(target + '.validation-report.json'):
+                print('Validation report: ' + target + '.validation-report.json', file=sys.stderr)
         return 1
     finally:
         print(f'[vk-build] end {label}', flush=True)

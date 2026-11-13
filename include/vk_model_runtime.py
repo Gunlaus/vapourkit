@@ -283,6 +283,29 @@ def raw_model(clips, engine_path, streams, details):
     return vs.core.trt.Model(clips, engine_path=str(engine_path), num_streams=streams)
 
 
+class EngineValidationError(RuntimeError):
+    def __init__(self, kind, report):
+        self.kind, self.report = kind, report
+        super().__init__('Engine validation failed (' + kind + '): ' + json.dumps(report, sort_keys=True))
+
+
+def compare_engine_output(actual, expected, shape, input_dtype, output_dtype):
+    import numpy as np
+    context = {'inputShape': list(shape), 'engineInputType': input_dtype, 'engineOutputType': output_dtype,
+               'actualOutputShape': list(actual.shape), 'referenceOutputShape': list(expected.shape)}
+    if actual.shape != expected.shape: raise EngineValidationError('shape-mismatch', context)
+    if not np.isfinite(actual).all() or not np.isfinite(expected).all():
+        raise EngineValidationError('nonfinite-output', context)
+    error = np.abs(actual.astype(np.float64) - expected.astype(np.float64))
+    tolerance = 0.01 + 0.02 * np.abs(expected)
+    worst = np.unravel_index(int(error.argmax()), error.shape)
+    context.update(maxAbsoluteError=float(error.max()), meanAbsoluteError=float(error.mean()),
+                   worstCoordinate=[int(i) for i in worst], actualAtWorst=float(actual[worst]), referenceAtWorst=float(expected[worst]),
+                   mismatchFraction=float(np.mean(error > tolerance)), rtol=0.02, atol=0.01)
+    if np.any(error > tolerance): raise EngineValidationError('accuracy-mismatch', context)
+    return context
+
+
 def validate_engine(engine_path, opts):
     """Real plugin inference, not only deserialization or clip metadata."""
     import numpy as np
@@ -297,34 +320,45 @@ def validate_engine(engine_path, opts):
     shapes = binding['profiles'][0] if binding.get('profiles') else [binding['shape']]
     # Test profile endpoints as well as optimum, exposing invalid shape tactics.
     results = []
-    accuracy = {'status': 'not-compared'}
+    accuracy = {'status': 'not-compared', 'samples': [], 'scope': 'first-profile-shape'}
     reference = None
     try:
         import onnxruntime as ort
         reference = ort.InferenceSession(str(opts['onnx']), providers=['CPUExecutionProvider'])
     except Exception as error:
         accuracy = {'status': 'reference-unavailable', 'reason': str(error)[:1000]}
+    input_type = binding['dtype'].lower()
+    if input_type not in ('datatype.float', 'datatype.half', 'float32', 'float16'):
+        raise RuntimeError('Unsupported engine input type for RGB validation: ' + input_type)
     for shape in sorted(set(tuple(s) for s in shapes)):
         n, channels, height, width = shape
         if n != 1 or channels != contract['inputs'][0]['shape'][1]: raise RuntimeError('Engine profile disagrees with the ONNX RGB contract.')
         clip = vs.core.std.BlankClip(width=width, height=height, format=vs.RGBS, length=3, color=[0.2, 0.4, 0.6])
-        output = raw_model([clip] * (channels // 3), engine_path, 1, details)
+        # Read the exact planes supplied to TensorRT, after its I/O cast. The
+        # original ONNX may expose FP32 while the built engine exposes FP16.
+        fmt = vs.RGBH if input_type in ('datatype.half', 'float16') or contract['inputs'][0]['dtype'] == 10 else vs.RGBS
+        supplied = vs.core.resize.Point(clip, format=fmt)
+        window = [supplied] * (channels // 3)
+        output = raw_model(window, engine_path, 1, details)
         for index in (0, 2):
             frame = output.get_frame(index)
             if not all(np.isfinite(np.asarray(frame[p])).all() for p in range(frame.format.num_planes)):
-                raise RuntimeError('Engine produced NaN/Inf values. Use a validated higher-precision export.')
+                raise EngineValidationError('nonfinite-output', {'inputShape':list(shape), 'frame':index, 'engineInputType':input_type})
         if reference is not None and not results:
             dtype = np.float16 if contract['inputs'][0]['dtype'] == 10 else np.float32
             data = np.empty(shape, dtype=dtype)
-            for channel in range(channels): data[0, channel].fill([0.2, 0.4, 0.6][channel % 3])
+            for index, sample in enumerate(window):
+                frame = sample.get_frame(0)
+                for plane in range(3): data[0, index * 3 + plane] = np.asarray(frame[plane])
             expected = reference.run([contract['outputs'][0]['name']], {contract['inputs'][0]['name']: data})[0].astype(np.float32)
             frame = output.get_frame(0)
             actual = np.stack([np.asarray(frame[p], dtype=np.float32) for p in range(3)])[None]
-            if actual.shape != expected.shape or not np.allclose(actual, expected, rtol=0.02, atol=0.01, equal_nan=False):
-                raise RuntimeError('Engine accuracy comparison failed against ONNX Runtime. Use a higher-precision source/build; the previous engine was kept.')
-            accuracy = {'status': 'passed', 'reference': 'onnxruntime-cpu', 'maxAbsoluteError': float(np.abs(actual - expected).max()), 'rtol': 0.02, 'atol': 0.01}
+            report = compare_engine_output(actual, expected, shape, input_type, details['outputs'][0]['dtype'])
+            accuracy['status'] = 'passed'
+            accuracy['reference'] = 'onnxruntime-cpu'
+            accuracy['samples'].append(report)
         results.append({'input': list(shape), 'output': [output.height, output.width]})
-        del output, clip
+        del output, clip, supplied, window
     return {'schema': SCHEMA, 'contract': contract, 'sourceRelative': os.path.relpath(opts['onnx'], Path(engine_path).parent), 'runtime': runtime_identity(), 'bindings': details,
             'precision': 'fp32' if not (opts['fp16'] or opts['bf16']) else 'bf16' if opts['bf16'] else 'fp16',
             'engineSha256': digest(engine_path), 'validation': {'execution': results, 'accuracy': accuracy}}

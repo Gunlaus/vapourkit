@@ -106,6 +106,42 @@ class ModelRuntimeTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertEqual(target.read_bytes(), b'working engine')
         self.assertEqual(list(self.root.glob('*.candidate-*')), [])
+    def test_accuracy_retry_disables_tf32_and_publishes_only_after_passing(self):
+        source=self.root/'retry.onnx'; model(source)
+        target=self.root/'retry.engine'; target.write_bytes(b'previous')
+        modes=[]
+        def build_candidate(opts):
+            modes.append(opts['no_tf32'])
+            Path(opts['save_engine']).write_bytes(b'strict' if opts['no_tf32'] else b'candidate')
+            return 0
+        def validate(file,opts):
+            self.assertEqual(target.read_bytes(),b'previous')
+            if not opts['no_tf32']: raise runtime.EngineValidationError('accuracy-mismatch',{'maxAbsoluteError':0.1})
+            return {'schema':1,'validation':{'accuracy':{'status':'passed'}}}
+        fake_trt=types.SimpleNamespace(BuilderFlag=types.SimpleNamespace(TF32=1))
+        with patch.dict(sys.modules,{'tensorrt':fake_trt}),patch.object(builder,'build',build_candidate),patch.object(runtime,'validate_engine',validate):
+            status=builder.main(['--onnx='+str(source),'--saveEngine='+str(target),'--fp16'])
+        self.assertEqual(status,0); self.assertEqual(modes,[False,True]); self.assertEqual(target.read_bytes(),b'strict')
+        saved=json.loads(Path(str(target)+'.json').read_text())
+        self.assertTrue(saved['validation']['noTF32'])
+        self.assertEqual(len(saved['validation']['buildAttempts']),2)
+        self.assertEqual(json.loads(Path(str(target)+'.validation-report.json').read_text())['status'],'passed')
+
+    def test_accuracy_retry_is_bounded_and_layout_errors_do_not_retry(self):
+        source=self.root/'failed.onnx'; model(source)
+        fake_trt=types.SimpleNamespace(BuilderFlag=types.SimpleNamespace(TF32=1))
+        for kind,expected_attempts in [('accuracy-mismatch',2),('shape-mismatch',1),('nonfinite-output',1)]:
+            with self.subTest(kind=kind):
+                target=self.root/(kind+'.engine'); target.write_bytes(b'previous')
+                modes=[]
+                def build_candidate(opts): modes.append(opts['no_tf32']); Path(opts['save_engine']).write_bytes(b'unverified'); return 0
+                with patch.dict(sys.modules,{'tensorrt':fake_trt}),patch.object(builder,'build',build_candidate),patch.object(runtime,'validate_engine',side_effect=runtime.EngineValidationError(kind,{'maxAbsoluteError':0.5})):
+                    status=builder.main(['--onnx='+str(source),'--saveEngine='+str(target)])
+                self.assertEqual(status,1); self.assertEqual(len(modes),expected_attempts)
+                self.assertEqual(target.read_bytes(),b'previous')
+                self.assertEqual(json.loads(Path(str(target)+'.validation-report.json').read_text())['status'],'failed')
+                self.assertFalse(list(self.root.glob('*.candidate-*')))
+
     def test_runtime_fingerprint_changes_cache_location(self):
         opts = {'save_engine': str(self.root / 'model.engine')}
         with patch.object(runtime, 'runtime_identity', return_value={'tensorrt': '11.3', 'gpu': 'one'}): a = builder.blacklist_path_for(opts, 'structure', 'fp16')
@@ -119,11 +155,56 @@ class ModelRuntimeTests(unittest.TestCase):
         class Output:
             height = width = 64
             def get_frame(self, index): return Frame()
-        fake_vs = types.SimpleNamespace(RGBS=32, core=MagicMock())
+        fake_vs = types.SimpleNamespace(RGBS=32, RGBH=16, core=MagicMock())
+        class InputFrame:
+            def __getitem__(self, plane): return np.full((64,64), [0.2,0.4,0.6][plane], np.float32)
+        fake_vs.core.std.BlankClip.return_value.get_frame.return_value = InputFrame()
+        fake_vs.core.resize.Point.side_effect = lambda clip, **kwargs: clip
         opts = {'onnx': str(source), 'adapter': runtime.ADAPTER, 'fp16': False, 'bf16': False}
-        bindings = {'inputs': [{'shape': [1, 3, 64, 64]}], 'outputs': [{'shape': [1, 3, 64, 64]}]}
+        bindings = {'inputs': [{'shape': [1, 3, 64, 64], 'dtype': 'DataType.FLOAT'}], 'outputs': [{'shape': [1, 3, 64, 64], 'dtype': 'DataType.FLOAT'}]}
         with patch.dict(sys.modules, {'vapoursynth': fake_vs}), patch.object(runtime, 'engine_details', return_value=bindings), patch.object(runtime, 'raw_model', return_value=Output()):
-            with self.assertRaisesRegex(RuntimeError, 'accuracy comparison failed'): runtime.validate_engine('candidate', opts)
+            with self.assertRaisesRegex(runtime.EngineValidationError, 'accuracy-mismatch'): runtime.validate_engine('candidate', opts)
+    def test_reference_uses_exact_engine_input_values_for_image_and_temporal_models(self):
+        import onnxruntime as ort
+        class Frame:
+            format = types.SimpleNamespace(num_planes=3)
+            def __init__(self, values): self.values = values
+            def __getitem__(self, plane): return self.values[plane]
+        class Clip:
+            width = height = 4
+            def __init__(self, values): self.values = values
+            def get_frame(self, index): return Frame(self.values)
+        core = types.SimpleNamespace(
+            std=types.SimpleNamespace(BlankClip=lambda **kw: Clip(np.stack([np.full((4,4), c, np.float32) for c in kw['color']]))),
+            resize=types.SimpleNamespace(Point=lambda clip,format: Clip(clip.values.astype(np.float16 if format==16 else np.float32))))
+        fake_vs = types.SimpleNamespace(RGBS=32, RGBH=16, core=core)
+        for channels in (3,15):
+            with self.subTest(channels=channels):
+                source = self.root / f'quantized-{channels}.onnx'
+                first = helper.make_tensor_value_info('pixels',TensorProto.FLOAT,[1,channels,4,4])
+                last = helper.make_tensor_value_info('output',TensorProto.FLOAT,[1,3,4,4])
+                indices = onnx.numpy_helper.from_array(np.arange(channels//2-1,channels//2+2,dtype=np.int64),name='center')
+                bias = onnx.numpy_helper.from_array(np.array(float(np.float16(0.2)),np.float32),name='bias')
+                gain = onnx.numpy_helper.from_array(np.array(4096,np.float32),name='gain')
+                graph = helper.make_graph([helper.make_node('Gather',['pixels','center'],['rgb'],axis=1),helper.make_node('Sub',['rgb','bias'],['difference']),helper.make_node('Mul',['difference','gain'],['output'])], 'rounding-sensitive', [first],[last],[indices,bias,gain])
+                onnx.save(helper.make_model(graph,opset_imports=[helper.make_opsetid('',13)],ir_version=10),source)
+                session = ort.InferenceSession(str(source),providers=['CPUExecutionProvider'])
+                def simulated_engine(clips,*args):
+                    values = np.stack([np.asarray(c.get_frame(0)[p],dtype=np.float16).astype(np.float32) for c in clips for p in range(3)])[None]
+                    return Clip(session.run(None,{'pixels':values})[0][0])
+                details = {'inputs':[{'shape':[1,channels,4,4],'dtype':'DataType.HALF'}],'outputs':[{'shape':[1,3,4,4],'dtype':'DataType.FLOAT'}]}
+                opts={'onnx':str(source),'adapter':runtime.ADAPTER,'fp16':True,'bf16':False}
+                with patch.dict(sys.modules,{'vapoursynth':fake_vs}),patch.object(runtime,'engine_details',return_value=details),patch.object(runtime,'raw_model',side_effect=simulated_engine),patch.object(runtime,'runtime_identity',return_value={}),patch.object(runtime,'digest',return_value='test'):
+                    report=runtime.validate_engine('candidate',opts)
+                self.assertEqual(report['validation']['accuracy']['samples'][0]['maxAbsoluteError'],0)
+
+    def test_shape_nonfinite_and_accuracy_failures_are_distinct(self):
+        for actual,expected,kind in [(np.zeros((1,3,2,2)),np.zeros((1,3,4,4)),'shape-mismatch'),(np.full((1,3,2,2),np.nan),np.zeros((1,3,2,2)),'nonfinite-output'),(np.ones((1,3,2,2)),np.zeros((1,3,2,2)),'accuracy-mismatch')]:
+            with self.subTest(kind=kind),self.assertRaises(runtime.EngineValidationError) as error:
+                runtime.compare_engine_output(actual,expected,[1,3,2,2],'float16','float32')
+            self.assertEqual(error.exception.kind,kind)
+            self.assertIn('actualOutputShape',error.exception.report)
+
     def test_generic_wrappers_are_not_forced_into_the_rgb_contract(self):
         fake_vs = types.SimpleNamespace(core=MagicMock())
         with patch.dict(sys.modules, {'vapoursynth': fake_vs}), patch.object(runtime, 'engine_details', return_value={'inputs': ['images', 'timestep']}), patch.object(runtime, 'runtime_identity', return_value={}), patch.object(runtime, 'digest', return_value='hash'), patch.object(runtime, 'graph_contract', side_effect=AssertionError('RGB inspection must not run')):

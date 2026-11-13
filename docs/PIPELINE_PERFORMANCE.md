@@ -83,3 +83,15 @@ Managed source reads (frame counting, generated workflows, side-chain video load
 Every Python reader holds an OS-backed lease, shared across script/preview/encode processes. Successful real encodes mark their sources for cleanup; cleanup waits for all reader leases and pending/processing queue references to release. Deferred cleanup retries periodically. OS locks release even after a reader is killed. A new render attempt supersedes an older completion marker, so its failure or cancellation retains the index for retry. Graph validation, preview alone and benchmark runs do not count as successful encodes.
 
 Only known BestSource index files inside app-owned source directories are removed. Small coordination files/directories can remain. Cleanup is separate from TensorRT engine caches. Arbitrary user filter code that calls BestSource directly controls its own cache paths and is outside this ownership policy.
+
+## Shared engine accuracy validation
+
+For new RGB engine builds, the ONNX Runtime comparison receives the exact plane values supplied to TensorRT, including input precision rounding. Previously a newly converted FP16-input engine could receive rounded pixels while the FP32 ONNX reference received unrounded pixels. That compared different inputs and could falsely reject a correct engine. The common path covers supported image and channel-packed temporal RGB models.
+
+Shape mismatch, non-finite output, and numerical mismatch are now distinct failures. Numerical reports include input/output shapes, engine I/O types, maximum/mean absolute error, fraction of elements outside tolerance, and the worst coordinate/values. The existing absolute 0.01 and relative 0.02 tolerances remain unchanged. Accuracy comparison remains at the first profile shape, while profile endpoints also receive finite-frame execution checks; these synthetic checks do not certify every possible input/model architecture.
+
+A numerical mismatch can trigger one retry with TF32 disabled, only when TensorRT exposes that control and the model has FP32 input or weights. Graph FP16/BF16 types are preserved. Layout errors and NaN/Inf do not take this retry. An explicit no-TF32 build or a second mismatch stops. Failed candidates never replace a working engine. The sidecar records the final TF32 policy and attempt history, and compilation fallback caches distinguish that policy.
+
+`<engine>.validation-report.json` records failed or recovered validation attempts. Build progress reaches 100% only after validation and publication. These changes repair a shared validation defect; the reported TSPAN export still needs testing on the target GPU. Existing validated engine caches are retained.
+
+Code-only pushes whose commit message contains `[no-package]` run CI quality checks while holding installer/AppImage packaging. Pull requests and manual workflow dispatches retain the full checks and packaging path.
