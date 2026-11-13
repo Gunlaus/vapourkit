@@ -89,6 +89,7 @@ beforeAll(async () => {
   await fs.copy(templateSrc, path.join(configDir, 'vapoursynth_template.vpy'));
   // The bundled runtime sits under the app path, which generateScript copies
   // it into config/ from
+  await fs.copy(path.join(__dirname, '..', 'include', 'vk_source_cache.py'), path.join(testRoot, 'include', 'vk_source_cache.py'));
   await fs.copy(RUNTIME_SRC, path.join(testRoot, 'include', 'vk_runtime.py'));
 });
 
@@ -782,7 +783,8 @@ describe('source timing', () => {
 
     const timecodes = scriptPath.replace(/\.vpy$/, '.timecodes.txt').replace(/\\/g, '/');
     expect(script).toContain(`source_timecodes = "${timecodes}"`);
-    expect(script).toContain('core.bs.VideoSource(source=source_path, cachemode=3, timecodes=source_timecodes)');
+    expect(script).toContain('clip = vk_video_source(source_path, root=');
+    expect(script).toContain('timecodes=source_timecodes)');
     expect(script).toContain('clip = vk_timed_output(clip, vk_source_fps, source_timecodes)');
     expect(script).toMatch(/from vk_runtime import [^\n]*vk_timed_output/);
     expect(script.indexOf('vk_timed_output(clip')).toBeGreaterThan(script.indexOf('from vk_runtime import'));
@@ -842,4 +844,18 @@ describe('opt-in AI chaining', () => {
     expect((text.match(/# Convert to YUV for filter compatibility/g)||[]).length).toBe(2);
     expect(text).toContain('_vk_sys.stdout = _vk_sys.stderr');
   });
+});
+
+it('refreshes a stale generated template even when dev packages share an app version', async () => {
+  const shipped = path.join(testRoot, 'include', 'vapoursynth_template.vpy');
+  const installed = path.join(testRoot, 'data', 'config', 'vapoursynth_template.vpy');
+  const actual = path.join(__dirname, '..', 'include', 'vapoursynth_template.vpy');
+  await fs.copy(actual, shipped);
+  try {
+    await fs.writeFile(installed, '# stale template from an earlier dev package');
+    const script = await generate([]);
+    expect(script).toContain('from vk_source_cache import video_source as vk_video_source');
+    expect(script).not.toContain('{{SOURCE_CACHE_ROOT}}');
+    expect(await fs.readFile(installed, 'utf8')).toBe(await fs.readFile(actual, 'utf8'));
+  } finally { await fs.remove(shipped); await fs.copy(actual, installed); }
 });

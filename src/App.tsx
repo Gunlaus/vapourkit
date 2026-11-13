@@ -744,6 +744,11 @@ function App() {
     }
   }, [showPreview, closeChainPreview, addConsoleLog, updatePreviewFrame]);
 
+  useEffect(() => window.electronAPI.onPreviewSuspendedForRender(() => {
+    addConsoleLog('Released the interactive preview for rendering; reopen it after processing.');
+    void closeChainPreview();
+  }), [closeChainPreview, addConsoleLog]);
+
   const handleToggleChainPreview = useCallback(() => {
     setShowPreview(true);
     // Mid-open the button is a cancel: a preflight can sit in an engine build

@@ -26,7 +26,7 @@ def main():
         before=workflow.read_bytes()
         bundle=root/'benchmark.json'
         bundle.write_text(json.dumps({'sourceScript':'source.vpy','scripts':{'legacy':'workflow.vpy'},'vspipe':vspipe,'ffmpeg':ffmpeg,'encoderArgs':['-c:v','libx264','-preset','veryfast','-crf','18','-threads','4','-map_metadata','1','-map','1:a?','-c:a','copy']}))
-        subprocess.run([sys.executable,str(ROOT/'scripts'/'benchmarkPipeline.py'),'--bundle',str(bundle),'--node',shutil.which('node'),'--frames','8','--runs','1','--requests','1','--threads','2','--preview','--preview-height','180','--preview-fps','5','--output',str(report)],check=True,timeout=120)
+        subprocess.run([sys.executable,str(ROOT/'scripts'/'benchmarkPipeline.py'),'--bundle',str(bundle),'--node',shutil.which('node'),'--frames','8','--runs','1','--requests','1','--threads','2','--compare-preview','--preview-height','180','--preview-fps','5','--output',str(report)],check=True,timeout=120)
         data=json.loads(report.read_text())
         assert data['cases'][0]['frames']==8
         assert set(data['cases'][0]['stages'])=={'decode','filter','encode','combined'}
@@ -35,7 +35,9 @@ def main():
         assert data['cases'][0]['stages']['combined']['samples'][0]['consumerCode']==0
         assert workflow.read_bytes()==before
         assert data['omittedNonVideoArgs']==['-map_metadata','1','-map','1:a?','-c:a','copy']
-        assert data['preview'] and data['previewHeight']==180 and data['previewFps']==5
+        assert [case['preview'] for case in data['cases']]==[False,True]
+        assert data['previewHeight']==180 and data['previewFps']==5
+        assert 'Filtername' in data['cases'][0]['stages']['filter']['samples'][0]['filterTimes']
         print('PASS: four real benchmark stages, bounded frame count, Node relay, unchanged source script')
 
 if __name__=='__main__': main()

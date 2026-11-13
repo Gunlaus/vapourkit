@@ -59,7 +59,7 @@ function pipeInputArgs(outputInfo: OutputInfo): string[] {
  */
 export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
   const { inputPath, outputPath, metadata, outputInfo, ffmpegConfig, audioTrim } = input;
-  const ffmpegArgs: string[] = ['-hide_banner', ...pipeInputArgs(outputInfo)];
+  const ffmpegArgs: string[] = ['-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', ...pipeInputArgs(outputInfo)];
 
   if (input.benchmarkMode) {
     ffmpegArgs.push('-f', 'null', '-');

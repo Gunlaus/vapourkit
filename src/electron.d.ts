@@ -154,6 +154,7 @@ export interface ElectronAPI {
   killUpscale: () => Promise<{ success: boolean }>;
   onUpscaleProgress: (callback: (progress: UpscaleProgress) => void) => () => void;
   onEngineBuildProgress: (callback: (status: EngineBuildStatus) => void) => () => void;
+  onPreviewSuspendedForRender: (callback: () => void) => () => void;
   openOutputFolder: (filePath: string) => Promise<void>;
   compareVideos: (inputPath: string, outputPath: string) => Promise<{ success: boolean; error?: string }>;
   launchVsePreviewer: (

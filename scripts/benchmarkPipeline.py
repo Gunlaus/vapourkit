@@ -50,7 +50,7 @@ def grid(text, minimum=0, maximum=32):
     return result
 
 
-def run(command, timeout):
+def run(command, timeout, filter_times=False):
     start = time.perf_counter()
     with tempfile.TemporaryFile() as errors:
         child = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=errors)
@@ -61,7 +61,11 @@ def run(command, timeout):
         if code:
             errors.seek(max(0, errors.tell()-10000))
             raise RuntimeError(f'{command[0]} failed ({code}): ' + errors.read().decode(errors='replace'))
-    return {'elapsedMs': (time.perf_counter()-start)*1000}
+        result = {'elapsedMs': (time.perf_counter()-start)*1000}
+        if filter_times:
+            errors.seek(0, 2); size = errors.tell(); errors.seek(max(0, size-65536))
+            result['filterTimes'] = errors.read().decode(errors='replace')
+    return result
 
 
 def pair(producer, consumer, timeout, root, node):
@@ -127,6 +131,7 @@ def main():
     parser.add_argument('--streams',type=lambda s:grid(s,1,16))
     parser.add_argument('--encoder-args',help='JSON array of video encoder arguments; default libx264/veryfast/CRF18/4 threads')
     parser.add_argument('--preview',action='store_true')
+    parser.add_argument('--compare-preview',action='store_true',help='Measure identical off/on preview cases without changing the saved workflow')
     parser.add_argument('--preview-height',type=int,default=720)
     parser.add_argument('--preview-fps',type=float,default=1)
     parser.add_argument('--timeout',type=int,default=600)
@@ -147,7 +152,7 @@ def main():
         parser.error('Output report must not overwrite an input script or bundle')
     if not 1<=args.frames<=10000 or not 1<=args.runs<=10 or not 1<=args.max_cache_mib<=65536: parser.error('Invalid frame/run/cache limit')
     if not 180<=args.preview_height<=1080 or not 0.1<=args.preview_fps<=5: parser.error('Invalid preview settings')
-    cases=list(itertools.product(args.requests,args.threads,args.streams or [None]))
+    cases=list(itertools.product(args.requests,args.threads,args.streams or [None],[False,True] if args.compare_preview else [args.preview]))
     if len(cases)>32: parser.error('At most 32 scheduling combinations per invocation')
     encoder=json.loads(args.encoder_args) if args.encoder_args else bundle.get('encoderArgs',['-c:v','libx264','-preset','veryfast','-crf','18','-threads','4'])
     if not isinstance(encoder,list) or not all(isinstance(a,str) for a in encoder): parser.error('Encoder arguments must be a JSON string array')
@@ -161,7 +166,7 @@ def main():
     report['notes'].append('Video only: audio/subtitle mapping and source metadata mapping are omitted. Reports/scripts contain local paths; review before sharing.')
     with tempfile.TemporaryDirectory(prefix='Vapourkit pipeline bench ') as directory:
         root=Path(directory)
-        for requests,threads,streams in cases:
+        for requests,threads,streams,preview in cases:
             source=root/'source.vpy'; workflow=root/'workflow.vpy'; metadata=root/'workflow.json'; source_info=root/'source.json'
             wrapper(args.source_script.resolve(),source,source_info,threads,None)
             wrapper(args.script.resolve(),workflow,metadata,threads,streams)
@@ -180,15 +185,15 @@ def main():
             run(base+['-c','mkv',str(workflow),str(snapshot)],args.timeout)
             def consumer(input):
                 command=[args.ffmpeg,'-hide_banner','-loglevel','error','-nostdin','-f','matroska','-i',input,'-map','0:v:0','-an','-sn','-frames:v',str(count),*encoder,'-fps_mode','passthrough','-f','null','-']
-                if args.preview: command+=['-map','0:v:0','-vf',f'fps={args.preview_fps},scale=-2:{args.preview_height//2*2}','-c:v','mjpeg','-pix_fmt','yuvj422p','-q:v','1','-f','image2pipe','pipe:1']
+                if preview: command+=['-map','0:v:0','-vf',f'fps={args.preview_fps},scale=-2:{args.preview_height//2*2}','-c:v','mjpeg','-pix_fmt','yuvj422p','-q:v','1','-f','image2pipe','pipe:1']
                 return command
-            case={'requests':requests,'threads':threads,'streams':streams,'frames':count,'output':data,'warmupMs':(time.perf_counter()-warm)*1000,'stages':{}}
+            case={'requests':requests,'threads':threads,'streams':streams,'preview':preview,'frames':count,'output':data,'warmupMs':(time.perf_counter()-warm)*1000,'stages':{}}
             for name in ('decode','filter','encode','combined'):
                 samples=[]
                 for repeat in range(args.runs):
                     print(f'{name} run {repeat+1}/{args.runs}; requests={requests}, threads={threads}, streams={streams}',file=sys.stderr)
                     if name=='decode': sample=run(base+[str(source),'--'],args.timeout)
-                    elif name=='filter': sample=run(base+['--filter-time',str(workflow),'--'],args.timeout)
+                    elif name=='filter': sample=run(base+['--filter-time',str(workflow),'--'],args.timeout,filter_times=True)
                     elif name=='encode': sample=run(consumer(str(snapshot)),args.timeout)
                     else: sample=pair(base+['-c','mkv',str(workflow),'-'],consumer('pipe:0'),args.timeout,root,args.node)
                     samples.append(sample)

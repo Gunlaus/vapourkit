@@ -61,6 +61,7 @@ export function useVideoProcessing({
   const benchmarkModeRef = useRef(false);
   // The file the running render writes, fixed when it starts.
   const renderOutputRef = useRef<string | null>(null);
+  const renderRequestRef = useRef(0);
 
   // Keep refs in sync
   useEffect(() => {
@@ -264,6 +265,7 @@ export function useVideoProcessing({
     }
 
     benchmarkModeRef.current = benchmarkMode;
+    const request = ++renderRequestRef.current;
     renderOutputRef.current = benchmarkMode ? null : outputPath;
     setIsProcessing(true);
     setIsStopping(false);
@@ -297,10 +299,15 @@ export function useVideoProcessing({
         segment,
         benchmarkMode
       );
+      if (request !== renderRequestRef.current) return;
       if (!result.success) {
-        onLog(`Error: ${result.error}`);
+        onLog(result.error === 'Canceled' ? 'Processing cancelled' : `Error: ${result.error}`);
+        renderOutputRef.current = null;
+        setIsProcessing(false);
+        setIsStopping(false);
       }
     } catch (error) {
+      if (request !== renderRequestRef.current) return;
       onLog(`Error: ${getErrorMessage(error)}`);
       renderOutputRef.current = null;
       setIsProcessing(false);
@@ -308,6 +315,7 @@ export function useVideoProcessing({
   };
 
   const handleCancelUpscale = async (): Promise<void> => {
+    renderRequestRef.current++;
     onLog('Canceling upscale...');
     setIsStopping(true);
     await window.electronAPI.cancelUpscale();
@@ -336,6 +344,7 @@ export function useVideoProcessing({
   };
 
   const handleForceStop = async (): Promise<void> => {
+    renderRequestRef.current++;
     onLog('Force stopping upscale process...');
     setIsStopping(true);
     await window.electronAPI.killUpscale();

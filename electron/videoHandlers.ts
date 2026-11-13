@@ -1,4 +1,5 @@
 import { timecodesPathFor } from './sourceTiming';
+import { beginSourceIndexes, completedSourceIndexes, sourceIndexRoot } from './sourceIndexCache';
 import { nvencEncoderOf, checkNvencEncoder } from './encodingSupport';
 import { setPreviewEnabled } from './previewSettings';
 import { ipcMain, BrowserWindow, shell, dialog, MessageChannelMain, type MessagePortMain } from 'electron';
@@ -271,7 +272,7 @@ export function registerVideoHandlers(
       }
       const input = JSON.stringify(request.videoPath.replace(/\\/g, '/'));
       const trim = request.segment?.enabled ? `clip=core.std.Trim(clip,first=${request.segment.startFrame}${request.segment.endFrame >= 0 ? `,last=${request.segment.endFrame - 1}` : ''})\n` : '';
-      await fs.writeFile(path.join(root, 'source.vpy'), `import sys\nsys.stdout=sys.stderr\nimport vapoursynth as vs\ncore=vs.core\nclip=core.bs.VideoSource(source=${input},cachemode=3)\n${trim}clip.set_output()\n`, 'utf8');
+      await fs.writeFile(path.join(root, 'source.vpy'), `import sys\nsys.stdout=sys.stderr\nsys.path.insert(0,${JSON.stringify(PATHS.APP_DATA.replace(/\\/g, '/'))})\nfrom vk_source_cache import video_source\nclip=video_source(${input},root=${JSON.stringify(sourceIndexRoot().replace(/\\/g, '/'))})\nimport vapoursynth as vs\ncore=vs.core\n${trim}clip.set_output()\n`, 'utf8');
       const encoder = await FFmpegSettingsManager.loadFFmpegConfig(configManager);
       await fs.writeJson(path.join(root, 'benchmark.json'), { schema: 1, sourceScript: 'source.vpy', scripts: { legacy: 'workflow.vpy', rgb: 'workflow-rgb.vpy' }, vspipe: PATHS.VSPIPE, ffmpeg: FFmpegManager.getFFmpegPath(), encoderArgs: encoder.videoArgs }, { spaces: 2 });
       return { cancelled: false, directory: root, message: `Benchmark bundle saved to ${root}. Run scripts/benchmarkPipeline.py --bundle <folder>/benchmark.json --output report.json from the repository.` };
@@ -420,7 +421,24 @@ export function registerVideoHandlers(
         });
       }
       
+      let temporaryScript: string | null = null;
+      const indexSources = [videoPath, ...((filters ?? []).filter((filter: any) => filter.enabled && filter.filterType === 'videoSource').map((filter: any) => filter.sourcePath).filter((file: unknown): file is string => typeof file === 'string'))];
       try {
+        await beginSourceIndexes(indexSources);
+        const previews = [openingPreviewJob.current?.session, previewJob.current?.session].filter((s): s is PreviewSession => !!s);
+        const released = previews.map(s => s.waitForExit());
+        closePreview();
+        mainWindow?.webContents.send('preview-suspended-for-render');
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([Promise.all(released), new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('The preview process has not released its GPU resources. Close the preview and retry.')), 10000); })]);
+        } finally { if (timeout) clearTimeout(timeout); }
+        qlog('[pipeline] Released in-app preview processes before rendering');
+        executor.onDiagnostic = message => itemLogger.write(message);
+        const trackedSources = new Set(indexSources);
+        executor.onSourceIndexRead = source => {
+          if (!trackedSources.has(source)) { trackedSources.add(source); void beginSourceIndexes([source]); }
+        };
         // Check encoding before expensive inference/engine builds, not only after a broken pipe.
         const nvenc = nvencEncoderOf(configManager.getFfmpegArgs());
         if (nvenc && !benchmarkMode) {
@@ -440,6 +458,7 @@ export function registerVideoHandlers(
         }
 
         const scriptPath = await scriptGenerator.generateScript(config);
+        temporaryScript = scriptPath;
         qlog(`Script generated: ${scriptPath}`);
 
         // Log script content to per-item log for troubleshooting
@@ -495,10 +514,9 @@ export function registerVideoHandlers(
 
         qlog('Starting execution');
         await executor.execute(scriptPath, outputPath, videoPath, { source: sourceProbe.streams, output: outputInfo }, segment?.enabled ? segment : undefined, fps, benchmarkMode);
+        if (executor.isStopped) throw new Error('Canceled');
 
-        // Cleanup
-        qlog('Cleaning up script file');
-        await scriptGenerator.cleanupScript(scriptPath);
+        if (!benchmarkMode) completedSourceIndexes([...new Set([...indexSources, ...executor.sourceIndexesRead])]);
 
         qlog('Processing completed successfully');
         return { success: true, outputPath };
@@ -512,8 +530,9 @@ export function registerVideoHandlers(
         } else {
           qerror(`Processing failed: ${errorMsg}`);
         }
-        return { success: false, error: errorMsg };
+        return { success: false, error: executor.isStopped ? 'Canceled' : errorMsg };
       } finally {
+        if (temporaryScript) await scriptGenerator.cleanupScript(temporaryScript).catch(error => logger.warn('Script cleanup deferred:', error));
         upscaleJob.release(job);
         drainingUpscales.delete(executor);
         itemLogger.close();
@@ -637,6 +656,7 @@ export function registerVideoHandlers(
     numStreams?: number,
     segment?: { enabled: boolean; startFrame: number; endFrame: number }
   ) => {
+    if (upscaleJob.current) return { success: false, error: 'Interactive preview is suspended while rendering.' };
     const token = ++previewOpenToken;
     const superseded = () => token !== previewOpenToken;
     let openingJob: PreviewJob | null = null;

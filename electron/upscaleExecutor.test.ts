@@ -176,3 +176,41 @@ describe('binary handoff completion', () => {
     await expect(run).rejects.toThrow('diagnostics to stdout');
   });
 });
+
+describe('confirmed processing outcomes', () => {
+  it('reports cancelled with flushed encoded frames, never planned frames or completion', async () => {
+    const { EventEmitter } = await import('events'); const { PassThrough } = await import('stream');
+    const fake = () => Object.assign(new EventEmitter(), {pid:1,killed:false,stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn()});
+    const producer=fake(), consumer=fake(); spawn.mockReset(); spawn.mockReturnValueOnce(producer).mockReturnValueOnce(consumer);
+    const executor=new UpscaleExecutor('/vs/vspipe','/py'); const messages: string[]=[]; const logs: string[]=[];
+    (executor as unknown as {sendProgress:(p:{type:string})=>void}).sendProgress=p=>messages.push(p.type);
+    executor.onDiagnostic = message => logs.push(message);
+    const run=executor.execute('/script','/out','/in',probes());
+    await vi.waitFor(()=>expect(spawn).toHaveBeenCalledTimes(2));
+    producer.stdout.write(Buffer.from('1a45dfa3','hex'));
+    consumer.stderr.write('frame=2\nfps=3\nprogress=continue\n');
+    executor.cancel();
+    producer.emit('close',1);
+    consumer.stderr.write('frame=4\nfps=3\nprogress=end\n');
+    consumer.emit('close',0);
+    await expect(run).rejects.toThrow('Processing was stopped');
+    expect(messages).not.toContain('complete');
+    const report=JSON.parse(logs.find(line=>line.startsWith('[pipeline-summary]'))!.slice('[pipeline-summary] '.length));
+    expect(report).toMatchObject({status:'cancelled',plannedFrames:10,encodedFrames:4,producedFrames:null});
+  });
+  it('records actual producer and encoder counts for a successful run', async () => {
+    const { EventEmitter } = await import('events'); const { PassThrough } = await import('stream');
+    const fake = () => Object.assign(new EventEmitter(), {pid:1,killed:false,stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn()});
+    const producer=fake(), consumer=fake(); spawn.mockReset(); spawn.mockReturnValueOnce(producer).mockReturnValueOnce(consumer);
+    const executor=new UpscaleExecutor('/vs/vspipe','/py'); const logs: string[]=[]; executor.onDiagnostic=line=>logs.push(line);
+    const run=executor.execute('/script','/out','/in',probes());
+    await vi.waitFor(()=>expect(spawn).toHaveBeenCalledTimes(2));
+    producer.stdout.write(Buffer.from('1a45dfa3','hex'));
+    producer.stderr.write('Output 10 video frames and 0 audio samples in 2.50 seconds\n');
+    producer.emit('close',0);
+    consumer.stderr.write('frame=10\nfps=4\nprogress=end\n');consumer.emit('close',0);
+    await run;
+    const report=JSON.parse(logs.find(line=>line.startsWith('[pipeline-summary]'))!.slice('[pipeline-summary] '.length));
+    expect(report).toMatchObject({status:'completed',encodedFrames:10,producedFrames:10,producerFps:4,producerTimingIncludesDownstreamBackpressure:true});
+  });
+});

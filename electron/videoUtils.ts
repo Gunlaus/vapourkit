@@ -1,4 +1,5 @@
 import { parseContainerTracks, type ContainerTrack } from './mediaTracks';
+import { ensureSourceIndexHelper, sourceIndexRoot } from './sourceIndexCache';
 import { logger } from './logger';
 import { FFmpegManager } from './ffmpegManager';
 import { PATHS } from './constants';
@@ -228,11 +229,15 @@ export async function getVideoFrameCount(
     const scriptPath = path.join(tempDir, `framecount_${Date.now()}.vpy`);
     const escapedPath = filePath.replace(/\\/g, '\\\\');
 
-    // cachemode=3 writes a .bsindex next to the source so the upscale step reuses it.
+    await ensureSourceIndexHelper();
+    // Frame counting, preview and encode share an app-owned index.
     const script = `import vapoursynth as vs
 core = vs.core
 
-clip = core.bs.VideoSource(source="${escapedPath}", cachemode=3)
+import sys
+sys.path.insert(0, ${JSON.stringify(PATHS.APP_DATA.replace(/\\/g, '/'))})
+from vk_source_cache import video_source
+clip = video_source("${escapedPath}", root=${JSON.stringify(sourceIndexRoot().replace(/\\/g, '/'))})
 clip.set_output()
 `;
 

@@ -49,6 +49,8 @@ jobs:
         run: python -m vapoursynth config
       - name: Test noisy cold-build binary transport
         run: python scripts/testRenderPipeline.py
+      - name: Test source index lifecycle across real readers
+        run: python scripts/testSourceCache.py
       - name: Test all benchmark stages
         run: python scripts/testPipelineBenchmark.py
       - name: Test model contracts and engine publication

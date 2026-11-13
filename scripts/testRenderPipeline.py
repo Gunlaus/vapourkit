@@ -58,10 +58,20 @@ def main():
         assert warm.returncode == 0, warm.stderr.decode(errors='replace')
         assert b'NOISY COLD BUILD' not in warm.stderr, 'Unchanged second process must reuse the validated engine'
         assert b'[vk-cache] Using validated engine:' in warm.stderr
-        decoded = subprocess.run([args.ffmpeg, '-v', 'error', '-f', 'matroska', '-i', 'pipe:0', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', 'pipe:1'], input=result.stdout, capture_output=True, timeout=30)
+        decoded = subprocess.run([args.ffmpeg, '-v', 'error', '-nostats', '-progress', 'pipe:2', '-f', 'matroska', '-i', 'pipe:0', '-f', 'rawvideo', '-pix_fmt', 'yuv420p', 'pipe:1'], input=result.stdout, capture_output=True, timeout=30)
         assert decoded.returncode == 0, decoded.stderr.decode(errors='replace')
         assert len(decoded.stdout) == 8 * 64 * 64 * 3 // 2, len(decoded.stdout)
         if shutil.which('node'):
+            parser = "const fs=require('fs');const {FFmpegProgress}=require(process.argv[1]);const records=[];const p=new FFmpegProgress(r=>records.push(r));p.push(fs.readFileSync(0,'utf8'));p.flush();console.log(JSON.stringify(records));"
+            for preview in (False, True):
+                progress_run = decoded
+                if preview:
+                    progress_run = subprocess.run([args.ffmpeg,'-v','error','-nostats','-progress','pipe:2','-f','matroska','-i','pipe:0','-map','0:v:0','-f','null','-','-map','0:v:0','-vf','fps=24,scale=-2:64','-c:v','mjpeg','-f','image2pipe','pipe:1'],input=result.stdout,capture_output=True,timeout=30)
+                    assert progress_run.returncode==0,progress_run.stderr
+                parsed=subprocess.run([shutil.which('node'),'-e',parser,str(ROOT/'dist'/'electron'/'ffmpegProgress.js')],input=progress_run.stderr,capture_output=True,timeout=10)
+                assert parsed.returncode==0,parsed.stderr
+                assert json.loads(parsed.stdout)[-1]['frame']==8
+                assert json.loads(parsed.stdout)[-1]['ended']
             spec=root/'pipe.json'; encoded=root/'encoded.mkv'
             spec.write_text(json.dumps({'producer':[str(vspipe),'-c','mkv','--outputindex','0',str(script),'-'], 'consumer':[args.ffmpeg,'-v','error','-f','matroska','-i','pipe:0','-c:v','ffv1','-y',str(encoded)], 'timeoutMs':60000}))
             relay=subprocess.run([shutil.which('node'),str(ROOT/'scripts'/'runBenchmarkPipe.cjs'),str(spec)],capture_output=True,text=True,timeout=70)

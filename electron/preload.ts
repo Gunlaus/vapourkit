@@ -113,6 +113,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('engine-build-progress', listener);
     return () => ipcRenderer.removeListener('engine-build-progress', listener);
   },
+  onPreviewSuspendedForRender: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('preview-suspended-for-render', listener);
+    return () => ipcRenderer.removeListener('preview-suspended-for-render', listener);
+  },
   openOutputFolder: (filePath: string) => ipcRenderer.invoke('open-output-folder', filePath),
   compareVideos: (inputPath: string, outputPath: string) => ipcRenderer.invoke('compare-videos', inputPath, outputPath),
   launchVsePreviewer: (

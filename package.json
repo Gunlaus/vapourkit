@@ -89,6 +89,7 @@
             "include/preview_server.py",
             "include/align_videos.py",
             "include/vk_runtime.py",
+            "include/vk_source_cache.py",
             "include/stock-app-config.json",
             "include/component-catalog.json",
             "package.json",
@@ -106,6 +107,7 @@
             "include/preview_server.py",
             "include/align_videos.py",
             "include/vk_runtime.py",
+            "include/vk_source_cache.py",
             "include/stock-app-config.json",
             "include/component-catalog.json",
             "node_modules/7zip-bin/**/*"

@@ -1,4 +1,5 @@
 import { rgbChainBoundaries } from './aiChainPlan';
+import { ensureSourceIndexHelper, sourceIndexRoot } from './sourceIndexCache';
 // electron/scriptGenerator.ts
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -322,6 +323,20 @@ export class VapourSynthScriptGenerator {
    * half a file.
    */
   private async syncRuntime(): Promise<void> {
+    await ensureSourceIndexHelper();
+    // Dev packages can share a version number. Generated infrastructure must
+    // still match this bundle before a script is evaluated.
+    const shippedTemplate = path.join(fixAsarPath(app.getAppPath()), 'include', 'vapoursynth_template.vpy');
+    if (await fs.pathExists(shippedTemplate)) {
+      const content = await fs.readFile(shippedTemplate);
+      const current = await fs.readFile(this.getTemplatePath()).catch(() => null);
+      if (!current?.equals(content)) {
+        await fs.ensureDir(PATHS.CONFIG);
+        const temporary = `${this.getTemplatePath()}.${process.pid}.tmp`;
+        await fs.writeFile(temporary, content);
+        await fs.move(temporary, this.getTemplatePath(), { overwrite: true });
+      }
+    }
     const helper = 'vk_model_runtime.py';
     const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
     if (await fs.pathExists(helperSource)) {
@@ -553,6 +568,8 @@ export class VapourSynthScriptGenerator {
       .replace(/{{DEFAULT_PRIMARIES}}/g, defaultPrimaries)
       .replace(/{{DEFAULT_TRANSFER}}/g, defaultTransfer)
       .replace(/{{OUTPUT_FORMAT}}/g, outputFormat)
+      .replace(/{{SOURCE_HELPER_DIR}}/g, () => JSON.stringify(PATHS.APP_DATA.replace(/\\/g, '/')))
+      .replace(/{{SOURCE_CACHE_ROOT}}/g, () => JSON.stringify(sourceIndexRoot().replace(/\\/g, '/')))
       .replace(/{{BACKEND_HELPER}}/g, backendHelper)
       .replace(/{{FILTERS}}/g, filterCode);
 
