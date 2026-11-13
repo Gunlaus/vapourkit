@@ -27,6 +27,7 @@ import {
   writeEditingItemId,
   writeLocalProject,
   writePreQueueSnapshot,
+  writeProjectConfigAside,
 } from './workflowStores';
 
 /**
@@ -37,7 +38,12 @@ import {
 export function loadDocument(fresh = false): WorkflowDocumentState {
   if (fresh) {
     // Jobs and user-exported workflows remain intact; only the working document resets.
-    return initialDocument({ ...DEFAULT_SETTINGS, defaultBackend: readStoredBackend() ?? DEFAULT_SETTINGS.defaultBackend }, [...CONFIG_FIELDS], null);
+    const project = { ...DEFAULT_SETTINGS, defaultBackend: readStoredBackend() ?? DEFAULT_SETTINGS.defaultBackend };
+    writeLocalProject(project, [...LOCAL_FIELDS]);
+    writePreQueueSnapshot(null);
+    writeProjectConfigAside(null);
+    writeEditingItemId(null);
+    return initialDocument(project, [...CONFIG_FIELDS], null);
   }
   let project = readLocalProject(DEFAULT_SETTINGS);
   let settled: ConfigField[] = [];

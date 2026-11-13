@@ -362,7 +362,8 @@ describe('explicit fresh working session', () => {
     const loaded = workflowDocumentReducer(state, { type: 'loaded', values: projectConfig() });
     expect(loaded.project.encoding.mode).toBe('simple');
     expect(loaded.project.filters).toEqual([]);
-    // An explicit saved queue is not deleted by starting a fresh editor.
-    expect(storage.getItem('preQueueWorkflow')).not.toBeNull();
+    // The pre-queue working snapshot is cleared; explicit queue files are separate.
+    expect(storage.getItem('preQueueWorkflow')).toBeNull();
+    expect(storage.getItem('filters')).toBe('[]');
   });
 });

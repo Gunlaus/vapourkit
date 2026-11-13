@@ -48,6 +48,8 @@ await page.addInitScript(() => {
 });
 await page.goto('http://127.0.0.1:5184');
 await page.getByRole('button',{name:'Add filter',exact:true}).waitFor();
+await page.waitForFunction(()=>window.test.encoding.simple.encoder==='software');
+await page.locator('select').filter({has:page.locator('option[value="nvidia"]')}).selectOption('nvidia');
 await page.waitForFunction(()=>window.test.encoding.simple.encoder==='nvidia');
 await page.getByText('Your NVIDIA driver is too old. Update the driver or use CPU encoding.',{exact:true}).waitFor();
 await page.getByRole('button',{name:'Use CPU encoding',exact:true}).click();

@@ -49,6 +49,9 @@ jobs:
       - name: Test official Adore FP16 export
         if: runner.os == 'Linux'
         run: python scripts/testAdoreExport.py --electron
+      - name: Test live VSRepo registry format and extraction
+        if: runner.os == 'Linux'
+        run: node scripts/testVsrepoRegistry.cjs
       - name: Install browser for UI smoke tests
         if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
