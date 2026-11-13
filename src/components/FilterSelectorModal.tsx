@@ -18,6 +18,7 @@ interface FilterSelectorModalProps {
   onEditTemplate?: (oldName: string, template: FilterTemplate) => Promise<boolean>;
   /** Puts back deleted built-in filters; answers the files restored */
   onRestoreTemplates?: () => Promise<string[]>;
+  onRefreshTemplates?: () => Promise<void>;
   currentSelection?: string;
 }
 
@@ -41,6 +42,7 @@ export const FilterSelectorModal = memo<FilterSelectorModalProps>(({
   onDeleteTemplate,
   onEditTemplate,
   onRestoreTemplates,
+  onRefreshTemplates,
   currentSelection = '',
 }) => {
   const [showRepository, setShowRepository] = useState(false);
@@ -166,7 +168,7 @@ export const FilterSelectorModal = memo<FilterSelectorModalProps>(({
 
   return (
     <>
-      {showRepository && <FilterRepositoryModal onClose={() => setShowRepository(false)} />}
+      {showRepository && <FilterRepositoryModal onClose={() => setShowRepository(false)} onInstalled={onRefreshTemplates} />}
       {editingTemplate && (
         <TemplateEditDialog
           template={editingTemplate}

@@ -4,7 +4,7 @@ import type { RepositoryEntry } from '../../electron/filterRepositoryTypes';
 import { ModalShell } from './ModalShell';
 import { ask } from '../utils/dialogs';
 
-export function FilterRepositoryModal({ onClose }: { onClose: () => void }) {
+export function FilterRepositoryModal({ onClose, onInstalled }: { onClose: () => void; onInstalled?: () => Promise<void> }) {
   const [entries, setEntries] = useState<RepositoryEntry[]>([]);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,6 +21,7 @@ export function FilterRepositoryModal({ onClose }: { onClose: () => void }) {
     setBusy(true); setMessage('Downloading, checking hashes and testing plugin loading…');
     try {
       const result = await window.electronAPI.installRepositoryFilter(entry.id);
+      await onInstalled?.();
       setMessage(result.message);
       setEntries(current => current.map(p => p.id === entry.id ? { ...p, installed: true } : p));
     } catch (error) { setMessage(String(error)); }

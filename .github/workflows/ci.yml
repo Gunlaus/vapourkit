@@ -40,6 +40,9 @@ jobs:
       - name: Test Windows embedded engine-builder imports
         if: runner.os == 'Windows'
         run: python scripts/testEmbeddedBuilder.py --download
+      - name: Test real Windows VSRepo plugin installation
+        if: runner.os == 'Windows'
+        run: python scripts/testVsrepoInstall.py
       - name: Install model validation test dependencies
         if: runner.os == 'Linux'
         run: python -m pip install onnx onnxruntime numpy

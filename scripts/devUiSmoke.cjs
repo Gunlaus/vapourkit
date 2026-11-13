@@ -81,6 +81,10 @@ assert.equal(await page.getByRole('region',{name:'Video preview panel'}).count()
 await page.reload();await page.getByTitle('Turn on preview panel',{exact:true}).waitFor();
 await page.waitForFunction(()=>window.test.preview===false);
 assert.equal((await filters()).length,0,'Relaunch should start with an empty filter chain');
+await page.getByRole('button',{name:'Add filter',exact:true}).click();
+await page.getByRole('button',{name:'VS Filter',exact:true}).click();
+await page.getByText('Identity test',{exact:true}).click();
+await page.waitForFunction(()=>JSON.parse(localStorage.getItem('filters')||'[]').length===1);
 await page.getByTitle('Turn on preview panel',{exact:true}).click();
 await page.getByLabel('Rate control',{exact:true}).selectOption('bitrate');
 await page.getByLabel('Target video bitrate (Mbps)',{exact:true}).fill('10');

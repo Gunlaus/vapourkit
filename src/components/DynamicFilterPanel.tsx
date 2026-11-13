@@ -33,6 +33,7 @@ interface DynamicFilterPanelProps {
   onDeleteTemplate?: (name: string) => Promise<boolean>;
   /** Puts back deleted built-in filters; answers the files restored */
   onRestoreTemplates?: () => Promise<string[]>;
+  onRefreshTemplates?: () => Promise<void>;
   onImportClick?: () => void;
   onModelsUpdated?: () => Promise<void>;
   /** Opens a visual editor declared by the selected .vkfilter template. */
@@ -99,6 +100,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
   onSaveTemplate,
   onDeleteTemplate,
   onRestoreTemplates,
+  onRefreshTemplates,
   onImportClick,
   onModelsUpdated,
   onOpenFilterEditor,
@@ -906,6 +908,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
             }
           }}
           onRestoreTemplates={onRestoreTemplates}
+          onRefreshTemplates={onRefreshTemplates}
           onDeleteTemplate={onDeleteTemplate ? async (name: string) => {
             const success = await onDeleteTemplate(name);
             if (success && showFilterSelector) {
