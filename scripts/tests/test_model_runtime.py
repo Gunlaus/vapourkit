@@ -195,7 +195,7 @@ class ModelRuntimeTests(unittest.TestCase):
                 details = {'inputs':[{'shape':[1,channels,4,4],'dtype':'DataType.HALF'}],'outputs':[{'shape':[1,3,4,4],'dtype':'DataType.FLOAT'}]}
                 opts={'onnx':str(source),'adapter':runtime.ADAPTER,'fp16':True,'bf16':False}
                 with patch.dict(sys.modules,{'vapoursynth':fake_vs}),patch.object(runtime,'engine_details',return_value=details),patch.object(runtime,'raw_model',side_effect=simulated_engine),patch.object(runtime,'runtime_identity',return_value={}),patch.object(runtime,'digest',return_value='test'):
-                    report=runtime.validate_engine('candidate',opts)
+                    report=runtime.validate_engine(str(self.root / 'candidate.engine'),opts)
                 self.assertEqual(report['validation']['accuracy']['samples'][0]['maxAbsoluteError'],0)
 
     def test_shape_nonfinite_and_accuracy_failures_are_distinct(self):
