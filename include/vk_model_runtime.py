@@ -4,6 +4,8 @@ Engine files are disposable caches. Model packages and saved workflows are not.
 No third-party Python adapters or native plugins are downloaded by this module.
 """
 import ctypes
+from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import os
@@ -11,9 +13,13 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import time
 
 SCHEMA = 1
 ADAPTER = 'rgb-window-v1'
+# Bump when an existing validated engine becomes incompatible with this adapter.
+# Logging/cache helper edits must not invalidate every model's GPU engine.
+ENGINE_ABI = 1
 _IDENTITY = None
 
 
@@ -25,6 +31,38 @@ def run_engine_builder(args):
     when Python's sys.stdout has already been redirected.
     """
     return subprocess.run(args, check=True, timeout=1800, stdout=2, stderr=2)
+
+
+@contextmanager
+def engine_build_lock(engine, timeout=1800):
+    """Coordinate preview/validation/render processes; OS releases locks on exit."""
+    with open(str(engine) + '.prepare.lock', 'a+b') as stream:
+        stream.seek(0, 2)
+        if stream.tell() == 0: stream.write(b'\0'); stream.flush()
+        deadline = time.monotonic() + timeout
+        waiting = False
+        while True:
+            try:
+                stream.seek(0)
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK): raise
+                if not waiting:
+                    print('[vk-cache] Waiting for another process to prepare ' + Path(engine).name, file=sys.stderr, flush=True)
+                    waiting = True
+                if time.monotonic() >= deadline: raise RuntimeError('Timed out waiting for model preparation. Check the other preview/build task.') from error
+                time.sleep(0.1)
+        try: yield
+        finally:
+            stream.seek(0)
+            if os.name == 'nt': msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else: fcntl.flock(stream, fcntl.LOCK_UN)
 
 
 def temporal_window(clip, frames):
@@ -172,10 +210,43 @@ def runtime_identity():
         except importlib.metadata.PackageNotFoundError: packages[package] = 'unavailable'
     plugin = vs.core.trt.Version()
     plugin = {str(k): v.decode(errors='replace') if isinstance(v, bytes) else str(v) for k, v in plugin.items()}
+    if plugin.get('path') and Path(plugin['path']).is_file():
+        plugin['binarySha256'] = cached_digest(plugin['path'])
     _IDENTITY = {'platform': platform.system(), 'machine': platform.machine(), 'tensorrt': trt.__version__,
                  'gpu': bytes(uuid).hex(), 'cudaDriver': version.value, 'plugin': plugin,
-                 'adapter': ADAPTER, 'helper': digest(__file__), 'packages': packages}
+                 'adapter': ADAPTER, 'engineAbi': ENGINE_ABI, 'helper': digest(__file__), 'packages': packages}
     return _IDENTITY
+
+
+def compatibility_identity(identity):
+    """Exclude diagnostics/location, retaining the actual loaded plugin's bytes."""
+    result = {k: v for k, v in identity.items() if k != 'helper'}
+    result.setdefault('engineAbi', 1)
+    if isinstance(result.get('plugin'), dict):
+        plugin = dict(result['plugin'])
+        location = plugin.pop('path', None)
+        if not plugin.get('binarySha256') and location:
+            # Upgrade a legacy manifest in place logically, without trusting a
+            # different binary merely because its version string is the same.
+            if Path(location).is_file(): plugin['binarySha256'] = cached_digest(location)
+            else: plugin['unresolvedLegacyPath'] = location
+        result['plugin'] = plugin
+    return result
+
+
+def engine_rejection(manifest, contract, identity, shape, precision, engine):
+    if not manifest: return 'missing or invalid validation manifest'
+    if manifest['contract'] != contract: return 'model source, weights, or adapter contract changed'
+    saved, current = compatibility_identity(manifest['runtime']), compatibility_identity(identity)
+    if saved != current:
+        changed = ', '.join(k for k in sorted(set(saved) | set(current)) if saved.get(k) != current.get(k))
+        return 'runtime compatibility changed: ' + changed
+    if manifest.get('precision') != precision: return 'requested precision changed'
+    try:
+        if not covers(manifest['bindings']['inputs'][0], shape): return 'input shape is outside the validated engine profile'
+    except (KeyError, TypeError, ValueError, IndexError): return 'invalid engine profile metadata'
+    if manifest['engineSha256'] != cached_digest(engine): return 'engine integrity check changed'
+    return None
 
 
 def engine_details(engine_path):
@@ -349,7 +420,8 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
         clips = temporal_window(first, required_frames) if required_frames > 1 else [first]
         shape[1] = required_frames * 3
     contract_key = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
-    check_key = (str(engine_path), tuple(shape), streams, contract_key)
+    selected_precision = 'bf16' if contract['inputs'][0]['dtype'] == 16 or 16 in contract.get('weightTypes', []) else precision
+    check_key = (str(engine_path), tuple(shape), streams, contract_key, selected_precision)
     cached = _CHECKED.get(check_key)
     if cached and Path(cached[0]).exists() and cached_digest(cached[0]) == cached[2]:
         return raw_model(clips, cached[0], streams, cached[1])
@@ -364,27 +436,40 @@ def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
     if any(isinstance(n, int) and n > 0 and n != shape[i] for i, n in enumerate(expected)):
         raise RuntimeError('This model has a fixed input shape ' + str(expected) + '; resize/pad before the model or use a dynamic export.')
     identity = runtime_identity()
-    healthy = manifest and manifest.get('schema') == SCHEMA and manifest['contract'] == contract and manifest['runtime'] == identity and manifest.get('precision') == ('bf16' if 16 in contract.get('weightTypes', []) else precision)
-    if healthy and covers(manifest['bindings']['inputs'][0], shape) and manifest['engineSha256'] == cached_digest(engine_path):
+    reason = engine_rejection(manifest, contract, identity, shape, selected_precision, engine_path) if engine_path.is_file() else 'selected engine does not exist yet'
+    if reason is None:
         selected, details = engine_path, manifest['bindings']
     else:
-        key = hashlib.sha256(json.dumps([contract, identity, shape, precision], sort_keys=True).encode()).hexdigest()[:24]
+        key = hashlib.sha256(json.dumps([contract, compatibility_identity(identity), shape, selected_precision], sort_keys=True).encode()).hexdigest()[:24]
         cache = source.parent / 'engines'; cache.mkdir(exist_ok=True)
         selected = cache / (source.stem + '-' + key + '.engine')
         metadata = Path(str(selected) + '.json')
-        valid = False
-        if selected.exists() and metadata.exists():
-            found = read_manifest(metadata)
-            valid = found is not None and found.get('runtime') == identity and found.get('contract') == contract and found.get('engineSha256') == cached_digest(selected) and covers(found['bindings']['inputs'][0], shape)
-        if not valid:
-            dtype = contract['inputs'][0]['dtype']
-            # A pretyped BF16 graph cannot be converted by an FP16 command flag.
-            selected_precision = 'bf16' if dtype == 16 or 16 in contract.get('weightTypes', []) else precision
-            args = [python, '-u', builder, '--onnx=' + str(source), '--saveEngine=' + str(selected),
-                    '--shapes=' + contract['inputs'][0]['name'] + ':' + 'x'.join(map(str, shape)), '--builderOptimizationLevel=3', '--vkAdapter=' + ADAPTER]
-            if selected_precision != 'fp32': args.append('--' + selected_precision)
-            run_engine_builder(args)
+        found = None
+        # A legacy key or a broader validated profile can be reused. Never
+        # broaden profiles here: architecture-specific shape constraints remain.
+        alternatives = sorted((p for p in cache.iterdir() if p.name.startswith(source.stem + '-') and p.suffix == '.engine' and p != selected), key=lambda p: p.name)
+        rejected = []
+        for candidate in [selected, *alternatives]:
+            if not candidate.is_file(): continue
+            candidate_manifest = read_manifest(str(candidate) + '.json')
+            rejection = engine_rejection(candidate_manifest, contract, identity, shape, selected_precision, candidate)
+            if rejection is None:
+                selected, found = candidate, candidate_manifest
+                metadata = Path(str(selected) + '.json')
+                break
+            if len(rejected) < 3: rejected.append(candidate.name + ': ' + rejection)
+        if found is None:
+            with engine_build_lock(selected):
+                # The process we waited for may already have published it.
+                concurrent = read_manifest(metadata) if selected.is_file() else None
+                if engine_rejection(concurrent, contract, identity, shape, selected_precision, selected) is not None:
+                    print('[vk-cache] Building for ' + source.name + ' at ' + 'x'.join(map(str, shape)) + ': ' + reason + ('. Cached candidates: ' + '; '.join(rejected) if rejected else ''), file=sys.stderr, flush=True)
+                    args = [python, '-u', builder, '--onnx=' + str(source), '--saveEngine=' + str(selected),
+                            '--shapes=' + contract['inputs'][0]['name'] + ':' + 'x'.join(map(str, shape)), '--builderOptimizationLevel=3', '--vkAdapter=' + ADAPTER]
+                    if selected_precision != 'fp32': args.append('--' + selected_precision)
+                    run_engine_builder(args)
         found = json.loads(metadata.read_text()); details = found['bindings']
+    print('[vk-cache] Using validated engine: ' + str(selected), file=sys.stderr, flush=True)
     if original == (clips[0].width, clips[0].height): _CHECKED[check_key] = (selected, details, cached_digest(selected))
     output = raw_model(clips, selected, streams, details)
     # Force actual source-frame evaluation before the encode process is launched.

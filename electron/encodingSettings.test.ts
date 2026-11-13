@@ -18,6 +18,7 @@ import {
   simpleWithCodec,
   splitArgs,
   withEncodingMode,
+  withSimpleEncoding,
   type EncodingSettings,
 } from './encodingSettings';
 import { parseFfmpegArgs } from './ffmpegConfig';
@@ -134,7 +135,14 @@ describe('encodingFrom', () => {
 });
 
 describe('switching modes', () => {
-  it('keeps the advanced arguments through simple edits, and the simple settings through advanced ones', () => {
+  it('updates the advanced baseline immediately when normal bitrate/audio controls change', () => {
+    const simple = { ...DEFAULT_ENCODING.simple, rateControl: 'bitrate' as const, bitrateMbps: 12, audioCodec: 'aac' as const, audioBitrateKbps: 256 };
+    const encoding = withSimpleEncoding({ ...DEFAULT_ENCODING, customArgs: '-c:v stale' }, simple);
+    expect(encoding.customArgs).toBe(simpleArgsOf(simple));
+    expect(encoding.customArgs).toContain('-b:v 12M');
+    expect(encoding.customArgs).toContain('-b:a 256k');
+  });
+  it('regenerates advanced arguments after normal codec changes and retains normal controls', () => {
     // Leaving advanced mode used to regenerate the arguments, and coming back
     // wrote stale stored arguments over the current ones.
     let encoding: EncodingSettings = { ...DEFAULT_ENCODING, mode: 'advanced', customArgs: '-c:v libx264 -crf 18 -tune film' };
@@ -142,11 +150,11 @@ describe('switching modes', () => {
     encoding = { ...encoding, simple: simpleWithCodec(encoding.simple, 'h265') };
     expect(resolveEncodingArgs(encoding)).toContain('libx265');
     encoding = withEncodingMode(encoding, 'advanced');
-    expect(resolveEncodingArgs(encoding)).toBe('-c:v libx264 -crf 18 -tune film');
+    expect(resolveEncodingArgs(encoding)).toBe(simpleArgsOf(encoding.simple));
     encoding = { ...encoding, customArgs: '-c:v libx264 -crf 12' };
     encoding = withEncodingMode(encoding, 'simple');
     expect(encoding.simple.codec).toBe('h265');
-    expect(encoding.customArgs).toBe('-c:v libx264 -crf 12');
+    expect(encoding.customArgs).toBe(simpleArgsOf(encoding.simple));
   });
 
   it('stays advanced when the typed arguments are ones the simple controls could show', () => {
@@ -159,7 +167,7 @@ describe('switching modes', () => {
     const simple = { codec: 'av1', encoder: 'software', preset: '6', quality: 28 } as const;
     const encoding = withEncodingMode({ mode: 'simple', simple, customArgs: '' }, 'advanced');
     expect(encoding.customArgs).toBe(simpleArgsOf(simple));
-    expect(withEncodingMode({ mode: 'simple', simple, customArgs: '-c:v x' }, 'advanced').customArgs).toBe('-c:v x');
+    expect(withEncodingMode({ mode: 'simple', simple, customArgs: '-c:v x' }, 'advanced').customArgs).toBe(simpleArgsOf(simple));
   });
 });
 

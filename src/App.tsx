@@ -1066,8 +1066,8 @@ function App() {
             edge-to-edge, so the middle is too. No floating cards. */}
         <div className="flex-1 min-w-0 flex overflow-hidden relative">
               {/* Preview pane — the console opens over it, the scrubber sits under it */}
-              {showPreview && <div role="region" aria-label="Video preview panel" className="relative flex flex-col flex-1 min-w-0 min-h-0">
-                  <VideoPreviewPanel
+              <div role="region" aria-label="Video preview panel" className="relative flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
+                  {showPreview ? <VideoPreviewPanel
                     previewFrame={previewFrame}
                     completedVideoPath={completedVideoPath}
                     completedVideoBlobUrl={completedVideoBlobUrl}
@@ -1120,9 +1120,9 @@ function App() {
                       onSelect: chainPreview.select,
                       onReload: () => void chainPreview.open(),
                     } : null}
-                  />
+                  /> : <div className="flex-1 min-h-0 grid place-items-center text-ink-500 text-sm">Preview is disabled</div>}
 
-                  {colorGrade.editor && (
+                  {showPreview && colorGrade.editor && (
                     <ColorGradeDock
                       values={colorGrade.values}
                       scopeSample={scopeSample}
@@ -1141,7 +1141,7 @@ function App() {
                     />
                   )}
 
-                  <Scrubber
+                  {showPreview && <Scrubber
                     videoInfo={videoInfo}
                     segment={segment}
                     isProcessing={isProcessing}
@@ -1163,9 +1163,7 @@ function App() {
                       loop: chainPreview.playback.loop,
                       onLoopChange: chainPreview.playback.setLoop,
                     }}
-                  />
-
-              </div>}
+                  />}
 
                   <ConsoleDrawer
                     open={showConsole}
@@ -1173,7 +1171,9 @@ function App() {
                     consoleOutput={consoleOutput}
                     consoleEndRef={consoleEndRef}
                     privacyMode={privacyMode}
+                    fill={!showPreview}
                   />
+              </div>
 
               {/* Drag handle — a hairline with a 5px grab area */}
               <div
@@ -1183,7 +1183,7 @@ function App() {
                 aria-label="Resize the settings column"
                 title="Drag to resize the settings column"
                 className={`w-[5px] flex-shrink-0 cursor-ew-resize relative transition-colors ${
-                  (gradeFocus || !showPreview) ? 'hidden' : ''
+                  (gradeFocus && showPreview) ? 'hidden' : ''
                 } ${isResizingSettings ? 'bg-accent-500/30' : 'hover:bg-accent-500/20'}`}
               >
                 <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-ink-800" aria-hidden="true" />
@@ -1206,7 +1206,7 @@ function App() {
               )}
 
               {/* Settings column — pixel width, dragged at its left edge */}
-                <div ref={rightPanelRef} style={{ width: showPreview ? settingsWidth : '100%' }} className={`flex-shrink-0 flex-col overflow-y-auto overflow-x-hidden min-h-0 bg-ink-950 ${gradeFocus && showPreview ? 'hidden' : 'flex'}`}>
+                <div ref={rightPanelRef} style={{ width: settingsWidth }} className={`flex-shrink-0 flex-col overflow-y-auto overflow-x-hidden min-h-0 bg-ink-950 ${gradeFocus && showPreview ? 'hidden' : 'flex'}`}>
                   {/* Video Input */}
                   <VideoInputPanel
                     editingLabel={queueEditingLabel}

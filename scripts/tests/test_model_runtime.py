@@ -153,7 +153,7 @@ class ModelRuntimeTests(unittest.TestCase):
             target = Path(next(a.split('=', 1)[1] for a in args if a.startswith('--saveEngine=')))
             shape = [1, 3, clip.height, clip.width]
             target.write_bytes(b'validated engine')
-            metadata = {'schema': 1, 'runtime': {'gpu': 'test'}, 'contract': runtime.graph_contract(source),
+            metadata = {'schema': 1, 'runtime': {'gpu': 'test'}, 'precision': 'fp16' if '--fp16' in args else 'fp32', 'contract': runtime.graph_contract(source),
                         'engineSha256': runtime.digest(target), 'bindings': {'inputs': [{'shape': shape}], 'outputs': []}}
             Path(str(target) + '.json').write_text(json.dumps(metadata))
         with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test'}), patch.object(runtime.subprocess, 'run', build), patch.object(runtime, 'raw_model', return_value=output), patch.object(runtime, 'validate_output', side_effect=AssertionError('Workflow construction must remain lazy')):
@@ -166,6 +166,39 @@ class ModelRuntimeTests(unittest.TestCase):
             weights = self.root / 'weights.bin'; weights.write_bytes(weights.read_bytes() + b'new checkpoint')
             runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
             self.assertEqual(len(calls), 2)
+            runtime.load_model(clip, source, 2, 'builder.py', sys.executable, precision='fp32')
+            self.assertEqual(len(calls), 3, 'A warm in-process FP16 entry must not mask a precision change')
+            self.assertNotIn('--fp16', calls[-1])
+
+    def test_fresh_interpreter_state_reuses_legacy_profile_despite_helper_edit(self):
+        source = self.root / 'model.onnx'; model(source)
+        cache = self.root / 'engines'; cache.mkdir()
+        engine = cache / 'model-legacy-key.engine'; engine.write_bytes(b'validated')
+        contract = runtime.graph_contract(source)
+        metadata = {'schema': 1, 'runtime': {'gpu': 'test', 'helper': 'old logging code'}, 'precision': 'fp16',
+                    'contract': contract, 'engineSha256': runtime.digest(engine),
+                    'bindings': {'inputs': [{'shape': [1,3,-1,-1], 'profiles': [[[1,3,64,64],[1,3,128,128],[1,3,256,256]]]}]}}
+        Path(str(engine)+'.json').write_text(json.dumps(metadata))
+        with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test', 'helper': 'new logging code'}), patch.object(runtime, 'run_engine_builder') as build, patch.object(runtime, 'raw_model', side_effect=lambda clips,*a: clips[0]):
+            for size in (128, 192, 128):
+                runtime._CHECKED.clear(); runtime._CONTRACTS.clear()
+                runtime.load_model(types.SimpleNamespace(width=size,height=size), source, 2, 'builder.py', sys.executable)
+                self.assertEqual(runtime.raw_model.call_args.args[1], engine)
+            build.assert_not_called()
+        for changed in ({'gpu':'other'}, {'gpu':'test','engineAbi':2}, {'gpu':'test','tensorrt':'new'}):
+            self.assertIn('runtime compatibility changed', runtime.engine_rejection(metadata,contract,changed,[1,3,128,128],'fp16',engine))
+        self.assertIn('precision',runtime.engine_rejection(metadata,contract,{'gpu':'test'},[1,3,128,128],'fp32',engine))
+        self.assertIn('profile',runtime.engine_rejection(metadata,contract,{'gpu':'test'},[1,3,512,512],'fp16',engine))
+        engine.write_bytes(b'corrupt')
+        self.assertIn('integrity',runtime.engine_rejection(metadata,contract,{'gpu':'test'},[1,3,128,128],'fp16',engine))
+
+    def test_plugin_location_is_diagnostic_but_plugin_bytes_remain_checked(self):
+        plugin = self.root/'plugin.dll'; plugin.write_bytes(b'plugin one')
+        copied = self.root/'copy.dll'; copied.write_bytes(plugin.read_bytes())
+        before = runtime.compatibility_identity({'plugin':{'version':'1','path':str(plugin)}})
+        self.assertEqual(before,runtime.compatibility_identity({'plugin':{'version':'1','path':str(copied)}}))
+        copied.write_bytes(b'plugin two')
+        self.assertNotEqual(before,runtime.compatibility_identity({'plugin':{'version':'1','path':str(copied)}}))
 
     def test_saved_engine_is_only_published_after_validation(self):
         source = self.root / 'model.onnx'; model(source)

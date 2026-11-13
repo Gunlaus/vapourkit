@@ -73,9 +73,13 @@ export const useModelImport = (
   onImportComplete: (enginePath?: string) => void,
   addConsoleLog: (message: string) => void
 ) => {
-  const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportModal, setShowImportModalState] = useState(false);
   const [modalMode, setModalMode] = useState<'import' | 'build'>('import');
   const [importProgress, setImportProgress] = useState<ModelImportProgress | null>(null);
+  const setShowImportModal = useCallback((show: boolean) => {
+    if (show) setImportProgress(null);
+    setShowImportModalState(show);
+  }, []);
   const [isImporting, setIsImporting] = useState(false);
   const [importForm, setImportForm] = useState<ImportForm>(DEFAULT_IMPORT_FORM);
   // Ref to access skipValidation inside callbacks without re-creating them
@@ -97,6 +101,7 @@ export const useModelImport = (
   }, [defaultBackend]);
 
   const handleSelectOnnxFile = useCallback(async (): Promise<void> => {
+    setImportProgress(null);
     try {
       const result = await window.electronAPI.selectOnnxFile();
       if (result) {
@@ -307,6 +312,7 @@ export const useModelImport = (
     if (!importForm.onnxPath || !importForm.modelName) return;
 
     setIsImporting(true);
+    setImportProgress(null);
     // Reset completion guard at the start of a new import/build
     completionGuardRef.current = false;
     try {
@@ -440,6 +446,7 @@ export const useModelImport = (
     setAutoBuildIsStatic(isStaticModel);
     setAutoBuildStaticShape(isStaticModel && detectedShape ? detectedShape.join('x') : null);
     setShowAutoBuildModal(true);
+    setImportProgress(null);
     setIsImporting(true);
     completionGuardRef.current = false;
     

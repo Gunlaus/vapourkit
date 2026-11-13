@@ -22,6 +22,7 @@ import {
   simpleWithCodec,
   simpleWithEncoder,
   withEncodingMode,
+  withSimpleEncoding,
   type EncodingSettings,
   type SimpleCodec,
   type SimpleEncoding,
@@ -95,7 +96,7 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
   };
 
   const handleSimpleChange = (simple: SimpleEncoding) => {
-    onEncodingChange({ ...encoding, simple });
+    onEncodingChange(withSimpleEncoding(encoding, simple));
   };
 
   const handleCodecChange = (codec: SimpleCodec) => {
@@ -447,6 +448,7 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
               </button>
             </div>
             <textarea
+              aria-label="Advanced FFmpeg arguments"
               value={encoding.customArgs}
               onChange={(e) => handleCustomArgsChange(e.target.value)}
               disabled={isProcessing}
@@ -456,16 +458,8 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
             />
             <div className="flex items-center justify-between gap-2 mt-1.5">
               <p className="text-[10.5px] text-ink-500">
-                Custom FFmpeg encoding arguments
+                Starts from the current normal settings automatically. Changing normal settings or reopening Advanced regenerates these arguments.
               </p>
-              <button
-                onClick={() => handleCustomArgsChange(simpleArgs)}
-                disabled={isProcessing || encoding.customArgs === simpleArgs}
-                title={`Replace these arguments with the simple settings: ${simpleArgs}`}
-                className="text-[10.5px] text-ink-400 hover:text-accent-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-ink-400"
-              >
-                Copy from simple settings
-              </button>
             </div>
           </div>
         )}

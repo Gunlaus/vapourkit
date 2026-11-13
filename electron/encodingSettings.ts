@@ -40,8 +40,8 @@ export interface SimpleEncoding {
 
 /**
  * How a render encodes its video. The mode decides which half is used: the
- * simple controls, or the FFmpeg arguments typed in advanced mode. Both halves
- * are kept, so switching modes loses nothing.
+ * simple controls, or the FFmpeg arguments typed in advanced mode. Normal
+ * controls regenerate the advanced baseline whenever they change.
  */
 export interface EncodingSettings {
   mode: EncodingMode;
@@ -202,13 +202,15 @@ export function encodingFrom(encoding: unknown, ffmpegArgs: unknown): EncodingSe
     : { ...migrated, simple: stored.simple };
 }
 
-/** Switch modes. Advanced mode with no arguments yet starts from the simple settings. */
+/** Edit normal controls and immediately refresh their advanced argument representation. */
+export function withSimpleEncoding(encoding: EncodingSettings, simple: SimpleEncoding): EncodingSettings {
+  return { ...encoding, simple, customArgs: simpleArgsOf(simple) };
+}
+
+/** Enter advanced mode using the current normal settings, never an old argument draft. */
 export function withEncodingMode(encoding: EncodingSettings, mode: EncodingMode): EncodingSettings {
   if (mode === encoding.mode) return encoding;
-  if (mode === 'advanced' && !encoding.customArgs.trim()) {
-    return { ...encoding, mode, customArgs: simpleArgsOf(encoding.simple) };
-  }
-  return { ...encoding, mode };
+  return { ...encoding, mode, customArgs: simpleArgsOf(encoding.simple) };
 }
 
 /** A new codec, keeping the encoder where the codec offers it, with that pair's default preset and quality. */

@@ -53,3 +53,15 @@ An R79/BestSource fixture used 96 frames of 1280×720 `testsrc2`, two RGB floati
 | RGB | 4 | 315.0 | 599.5 | 570.9 | 1272.7 |
 
 At four requests this fixture reduced measured filter time by about 25% and combined time by about 10%. A shorter 360p fixture gave mixed results, reinforcing the need for measurement. These are CPU conversion measurements, not measured TensorRT speedups. A first-frame 8-bit YUV comparison differed by at most one code value in this fixture; this does not bound differences after arbitrary neural models. RGB chaining therefore remains opt-in. No physical GPU throughput claim has been established.
+
+## Engine reuse and follow-up UI fixes
+
+Engine compatibility uses an explicit adapter ABI, model/weight hashes, GPU and runtime identity, precision, profile coverage, and engine integrity. The helper's entire source-file hash is diagnostic; an unrelated logging/cache edit does not invalidate every engine. Plugin location is diagnostic too, while the loaded binary's content hash and version fields remain compatibility checks. Legacy plugin paths are fingerprinted when available; an unresolved old path is not silently trusted. Breaking adapter changes must bump `ENGINE_ABI`.
+
+A validated cached engine with a different filename can be reused if all checks pass and its profile covers the requested stage dimensions. Preview, validation, and render processes coordinate preparation of the same cache key with an OS file lock, then recheck the published engine after waiting. Locks release on process exit. No architecture's profiles are automatically expanded. An uncovered resolution, changed model/weights, precision, GPU, runtime, or damaged engine can still require a build. `[vk-cache]` stderr lines identify reuse, waits, and rebuild reasons. This addresses concrete cache invalidation/selection gaps; a client log is still needed to identify the exact cause of a reported rebuild on a particular machine.
+
+The in-memory cache also distinguishes requested precision. Tests cover fresh process reuse, concurrent cold preparation producing just one build, broader validated profile reuse, and rejection of incompatible GPU/ABI/precision/profile or corrupt engine contents. GPU inference remains stubbed in CPU transport CI; these are cache/transport checks rather than physical GPU throughput measurements.
+
+Opening a new model build/import clears old progress and errors immediately. The preview pane remains when disabled, showing “Preview is disabled”; an open console fills that pane. Enabling preview restores the console's bottom drawer. Its width follows the preview pane and never covers the settings column.
+
+Normal encoding edits regenerate the advanced argument baseline immediately. Entering Advanced starts from the current normal controls automatically, replacing an earlier advanced draft. Raw edits apply while Advanced is selected; returning to normal and reopening Advanced regenerates the baseline. Saved workflows already in Advanced retain their arguments when loaded.
