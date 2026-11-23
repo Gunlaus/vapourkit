@@ -535,24 +535,109 @@ def reply(header: dict, payload: memoryview | bytes = b"") -> None:
     _out.flush()
 
 
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.PeekNamedPipe.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    )
+    _kernel32.PeekNamedPipe.restype = wintypes.BOOL
+    _kernel32.GetFileType.argtypes = (wintypes.HANDLE,)
+    _kernel32.GetFileType.restype = wintypes.DWORD
+    _FILE_TYPE_PIPE = 0x0003
+
+    # How long the reader sleeps between peeks when the pipe is empty. It is
+    # the worst-case latency a command adds, and a peek costs microseconds.
+    _STDIN_POLL_SECONDS = 0.002
+
+    def _stdin_waiter(fd: int):
+        """
+        Return a function that blocks until fd has bytes or has hit EOF.
+
+        A synchronous ReadFile pending on a pipe handle can deadlock the DLL
+        loads of a module imported on another thread (numpy/numpy#24290;
+        scipy's BLAS wrappers do it, which is why Fine Sharp hung Inspect). So
+        on a pipe the reader peeks and sleeps instead, and only calls read when
+        the read is certain to return at once. Anything that is not a pipe is
+        read directly, since a file or a console cannot be the parent's pipe.
+        """
+        handle = msvcrt.get_osfhandle(fd)
+        if _kernel32.GetFileType(handle) != _FILE_TYPE_PIPE:
+            return lambda: None
+        available = wintypes.DWORD()
+
+        def wait() -> None:
+            while True:
+                if not _kernel32.PeekNamedPipe(
+                    handle, None, 0, None, ctypes.byref(available), None
+                ):
+                    # The write end is gone. The read that follows returns
+                    # EOF or raises, and either ends the reader.
+                    return
+                if available.value:
+                    return
+                time.sleep(_STDIN_POLL_SECONDS)
+
+        return wait
+
+else:
+    import select
+
+    def _stdin_waiter(fd: int):
+        """
+        Return a function that blocks until fd is readable.
+
+        The import deadlock that the Windows path avoids does not exist here,
+        so this waits in select() without a timeout.
+        """
+
+        def wait() -> None:
+            select.select([fd], [], [])
+
+        return wait
+
+
 def _read_commands(commands: "queue.Queue") -> None:
     """
     stdin, on its own thread.
 
-    readline() rather than `for line in ...`, so a command is acted on the
-    moment its newline arrives instead of whenever an iterator's read-ahead
-    happens to fill. On a thread because the main loop cannot afford to sit in
-    a blocking read while a stream has frames to push — and, the other way
-    round, a stop must not queue behind a frame that takes a second to render.
+    Lines are split here from whatever os.read returns, so a command is acted
+    on the moment its newline arrives instead of whenever a buffered reader's
+    read-ahead happens to fill. The read only starts once bytes are known to be
+    waiting, which keeps this thread out of a blocking pipe read while the
+    executed script imports modules (see _stdin_waiter). On a thread because
+    the main loop cannot afford to wait for input while a stream has frames to
+    push — and, the other way round, a stop must not queue behind a frame that
+    takes a second to render.
     """
+    fd = sys.stdin.fileno()
+    wait = _stdin_waiter(fd)
+    pending = b""
     while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
+        wait()
+        try:
+            chunk = os.read(fd, 65536)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            line = pending.strip()
+            if line:
+                commands.put(line)
             commands.put(None)
             return
-        line = line.strip()
-        if line:
-            commands.put(line)
+        pending += chunk
+        *lines, pending = pending.split(b"\n")
+        for line in lines:
+            line = line.strip()
+            if line:
+                commands.put(line)
 
 
 def main() -> int:
