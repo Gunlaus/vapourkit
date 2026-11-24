@@ -1,3 +1,4 @@
+import { modelMetadataKey } from './modelIdentity';
 // electron/scriptGenerator.ts
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -163,7 +164,9 @@ export class VapourSynthScriptGenerator {
       if (!declaration) return match;
 
       const value = filter.parameters?.[key] ?? declaration.default;
-      if (value === undefined || (declaration.type && typeof value !== declaration.type) || (typeof value === 'number' && !Number.isFinite(value))) throw new Error(`Filter "${filter.preset || filter.id}": invalid value for "${key}". Correct the filter parameters or variable declaration.`);
+      if (value === undefined || (declaration.type && typeof value !== declaration.type) || (typeof value === 'number' && !Number.isFinite(value))) {
+        throw new Error(`Filter "${filter.preset || filter.id}": variable "${key}" needs a valid ${declaration.type || 'number, string or boolean'} value. Edit the filter parameters or correct its [variables.${key}] declaration and re-import it.`);
+      }
       if (typeof value === 'number') return Number.isFinite(value) ? String(value) : match;
       if (typeof value === 'boolean') return value ? 'True' : 'False';
       if (typeof value === 'string') return JSON.stringify(value);
@@ -323,6 +326,21 @@ export class VapourSynthScriptGenerator {
    * renamed over it, so a script starting meanwhile never reads half a file.
    */
   private async syncRuntime(): Promise<void> {
+    const helper = 'vk_model_runtime.py';
+    const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
+    if (await fs.pathExists(helperSource)) {
+      await fs.ensureDir(PATHS.CONFIG);
+      const content = await fs.readFile(helperSource);
+      const target = path.join(PATHS.CONFIG, helper);
+      const current = await fs.readFile(target).catch(() => null);
+      if (!current?.equals(content)) {
+        const staged = `${target}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`;
+        try {
+          await fs.writeFile(staged, content);
+          await fs.rename(staged, target);
+        } finally { await fs.remove(staged); }
+      }
+    }
     for (const file of RUNTIME_FILES) {
       const target = path.join(PATHS.CONFIG, file);
       const bundled = path.join(fixAsarPath(app.getAppPath()), 'include', file);
@@ -342,6 +360,7 @@ export class VapourSynthScriptGenerator {
   }
 
   async generateScript(config: ScriptConfig): Promise<string> {
+    const startedAt = Date.now();
     await this.syncRuntime();
     const templatePath = this.getTemplatePath();
     let template = await fs.readFile(templatePath, 'utf-8');
@@ -552,10 +571,14 @@ export class VapourSynthScriptGenerator {
       template = template.replace(/clip\.set_output\(\)\s*$/, '');
     }
 
+    // Metadata/preview/encode setup remains lazy. Explicit validation executes one
+    // frame through the whole graph, without seeking to the end of the source.
+    if (config.validationMode) template += '\n# Validate the first output frame.\nclip.get_frame(0)\n';
+    // Script print() calls are diagnostics. Only vspipe may write media to fd 1.
     template = 'import sys as _vk_sys\n_vk_sys.stdout = _vk_sys.stderr\n' + template;
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
-    logger.info(`Generated script: ${tempScriptPath}`);
+    logger.info(`Generated script: ${tempScriptPath} (${Date.now() - startedAt} ms)`);
     return tempScriptPath;
   }
 
@@ -579,41 +602,26 @@ export class VapourSynthScriptGenerator {
     const rgbFormat = useFp32 ? 'vs.RGBS' : 'vs.RGBH';
     code += '# Convert to RGB format for upscaling\n';
     code += `if ${CLIP}.format.id != ${rgbFormat}:\n`;
-    code += `    ${CLIP} = core.resize.Bilinear(${CLIP}, format=${rgbFormat}, matrix_in_s="${defaultMatrix}", primaries_in_s="${defaultPrimaries}", transfer_in_s="${defaultTransfer}")\n`;
+    code += `    if ${CLIP}.format.color_family == vs.RGB:\n`;
+    code += `        ${CLIP} = core.resize.Point(${CLIP}, format=${rgbFormat})\n`;
+    code += '    else:\n';
+    code += `        ${CLIP} = core.resize.Bilinear(${CLIP}, format=${rgbFormat}, matrix_in_s="${defaultMatrix}", primaries_in_s="${defaultPrimaries}", transfer_in_s="${defaultTransfer}")\n`;
     code += `${CLIP} = core.std.Expr(${CLIP}, expr=['x 0 max 1 min'])\n`;
 
     // Determine num_streams value (default to 2 if not specified)
-    const callOptions = { numStreams: numStreams ?? 2, useFp32 };
+    const metadataKey = modelMetadataKey(modelFile, PATHS.MODELS);
+    const callOptions = { numStreams: numStreams ?? 2, useFp32, useBf16: configManager.getModelMetadata?.(metadataKey)?.useBf16 ?? false };
 
     // Generate model inference code based on model type
     if (modelType === 'vsr') {
       // Use temporalFrames parameter or default to 5 for backward compatibility
       const frames = temporalFrames ?? 5;
-      const halfFrames = Math.floor(frames / 2);
-
+      if (!Number.isInteger(frames) || frames < 1 || frames % 2 === 0) throw new Error('Centered temporal models require a positive odd frame count; this model needs a dedicated frame-order adapter.');
       code += `# Temporal upscaling (${frames}-frame VSR architecture)\n`;
-
-      // Generate frame shift variables dynamically based on frame count
-      const frameVars: string[] = [];
-      for (let i = -halfFrames; i <= halfFrames; i++) {
-        if (i === 0) {
-          frameVars.push(CLIP);
-        } else {
-          const varName = i < 0 ? `m${Math.abs(i)}` : `p${i}`;
-          const shift = Math.abs(i);
-          if (i < 0) {
-            code += `${varName} = ${CLIP}[:${shift}] + ${CLIP}[:-${shift}]   # shift ${i}\n`;
-          } else {
-            code += `${varName} = ${CLIP}[${shift}:] + ${CLIP}[-${shift}:]   # shift +${i}\n`;
-          }
-          frameVars.push(varName);
-        }
-      }
-
-      // The model copies frame props from its first clip, which holds the
-      // earliest neighbour; each frame takes its own back, durations included.
+      code += 'import vk_model_runtime as _vk_models\n';
+      code += `_vk_window = _vk_models.temporal_window(${CLIP}, ${frames})\n`;
       code += `_vk_centre = ${CLIP}\n`;
-      code += provider.modelCallCode(`[${frameVars.join(', ')}]`, modelFile, callOptions);
+      code += provider.modelCallCode('_vk_window', modelFile, callOptions);
       code += `${CLIP} = core.std.CopyFrameProps(${CLIP}, _vk_centre)\n`;
       code += '\n';
     } else {
