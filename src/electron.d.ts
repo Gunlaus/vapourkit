@@ -58,6 +58,8 @@ export interface ElectronAPI {
   getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
   setPipelineSettings: (settings: import('../electron/pipelineSettings').PipelineSettings) => Promise<void>;
   setPreviewEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+  listCatalogModels: () => Promise<import('../electron/componentCatalog').ComponentSnapshot>;
+  installCatalogModel: (request: { id: string; version: string; experimental: boolean; accepted: boolean }) => Promise<{ message: string }>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;

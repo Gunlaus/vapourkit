@@ -28,8 +28,20 @@ export interface PluginLedgerEntry {
   files: string[];
 }
 
+export interface ModelLedgerEntry {
+  version: string;
+  appVersion: string;
+  installedAt: string;
+  author: string;
+  source: string;
+  license: string;
+  licenseUrl: string;
+  files: { path: string; sha256: string; bytes: number }[];
+}
+
 export interface InstallLedger {
   schema: 1;
+  models?: Record<string, ModelLedgerEntry>;
   templates: Record<string, LedgerEntry>;
   plugins: Record<string, PluginLedgerEntry>;
   /** vs-scripts, by source (scriptSources.ts) */
@@ -79,6 +91,7 @@ export async function readLedger(): Promise<InstallLedger> {
     const ledger = await fs.readJson(ledgerPath()) as Partial<InstallLedger>;
     return {
       schema: 1,
+      ...(ledger.models ? { models: ledger.models } : {}),
       templates: ledger.templates ?? {},
       plugins: ledger.plugins ?? {},
       scripts: ledger.scripts ?? {},

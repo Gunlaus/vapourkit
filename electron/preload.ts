@@ -251,6 +251,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('plugin-dependency-progress', listener);
   },
   
+  listCatalogModels: () => ipcRenderer.invoke('model-catalog-list'),
+  installCatalogModel: (request: { id: string; version: string; experimental: boolean; accepted: boolean }) => ipcRenderer.invoke('model-catalog-install', request),
   // Update operations
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   openReleasesPage: () => ipcRenderer.invoke('open-releases-page'),

@@ -1,5 +1,6 @@
 import { PipelineSettingsPanel } from './PipelineSettingsPanel';
 import { StartupSessionSettings } from './StartupSessionSettings';
+import { ModelCatalogPanel } from './ModelCatalogPanel';
 import { memo, useState, useEffect } from 'react';
 import { Settings, Info, Terminal, FolderOpen, Package, FileCode, RotateCcw, Cpu, Play, ChevronDown, ChevronUp, HardDrive, Palette, MessageCircle, PackageCheck, ChevronRight } from 'lucide-react';
 import type { BackendId, DiscordRichPresenceSettings, UpdateReportSnapshot } from '../electron.d';
@@ -12,6 +13,7 @@ import { ModalSectionHeader } from './ModalSectionHeader';
 import { ModalShell } from './ModalShell';
 
 interface SettingsModalProps {
+  onModelsUpdated?: () => Promise<void>;
   show: boolean;
   onClose: () => void;
   defaultBackend: BackendId;
@@ -43,6 +45,7 @@ type Tab = 'general' | 'processing';
 
 export const SettingsModal = memo<SettingsModalProps>(({
   show,
+  onModelsUpdated,
   onClose,
   defaultBackend,
   onChangeBackend,
@@ -173,6 +176,7 @@ export const SettingsModal = memo<SettingsModalProps>(({
         {activeTab === 'general' && (
           <>
             <StartupSessionSettings />
+            <ModelCatalogPanel onInstalled={onModelsUpdated} />
             {(updateNotes?.report || (updateNotes?.decisions.length ?? 0) > 0) && updateNotes && (
               <section>
                 <ModalSectionHeader icon={PackageCheck} title="Last Update" />
