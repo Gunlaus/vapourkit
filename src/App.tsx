@@ -1,3 +1,4 @@
+import { MediaTracksPanel } from './components/MediaTracksPanel';
 // src/App.tsx - Refactored with extracted components and hooks
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -1240,6 +1241,8 @@ function App() {
                     onProcessingFormatChange={handleUpdateProcessingFormat}
                     onBenchmarkModeChange={setBenchmarkMode}
                   />
+
+                  <MediaTracksPanel video={videoInfo} encoding={encoding} onChange={handleUpdateEncoding} disabled={isProcessing} outputFormat={outputFormat} />
 
                   {/* Video Info */}
                   <VideoInfoPanel

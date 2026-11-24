@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dependency management
   platform: process.platform,
+  checkEncodingSupport: (request: { encoder: string; pixelFormat: string }) => ipcRenderer.invoke('check-encoding-support', request),
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   getNvencDriverProblem: () => ipcRenderer.invoke('get-nvenc-driver-problem'),
   detectCudaSupport: () => ipcRenderer.invoke('detect-cuda-support'),

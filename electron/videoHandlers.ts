@@ -1,4 +1,6 @@
-import { ipcMain, BrowserWindow, shell, MessageChannelMain, type MessagePortMain } from 'electron';
+import { nvencPreflight } from './nvencPreflight';
+import { nvencEncoderOf } from './encodingSupport';
+import { ipcMain, BrowserWindow, shell, dialog, MessageChannelMain, type MessagePortMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
@@ -214,7 +216,8 @@ export function registerVideoHandlers(
         scanType: metadata.scanType,
         colorSpace: metadata.colorSpace,
         duration: metadata.duration,
-        frameCount: frameCount
+        frameCount: frameCount,
+        tracks: metadata.tracks,
       };
 
       logger.info(`Video info: ${info.name}, ${info.sizeFormatted}, ${metadata.resolution || 'unknown resolution'}, ${metadata.fps ? metadata.fps + ' fps' : 'unknown fps'}, ${metadata.pixelFormat || 'unknown format'}${frameCount ? `, ${frameCount} frames` : ''}`);
@@ -388,6 +391,21 @@ export function registerVideoHandlers(
       }
       
       try {
+        const nvenc = nvencEncoderOf(configManager.getFfmpegArgs());
+        if (nvenc && !benchmarkMode) {
+          const ffmpeg = FFmpegManager.getFFmpegPath();
+          if (!ffmpeg) throw new Error('FFmpeg is missing. Repair it using Start Setup in Settings.');
+          await nvencPreflight(ffmpeg, nvenc, configManager.getProcessingFormat(), () => executor.isStopped, async support => {
+            const options = {
+              type: 'warning' as const, title: 'NVENC capability test failed',
+              message: support.message,
+              detail: 'This test uses default encoder options, not your full settings. Your render may still work. Continue with your selected settings, or cancel and choose CPU encoding in Output settings.\n\n' + (support.details ?? ''),
+              buttons: ['Cancel', 'Continue anyway'], defaultId: 0, cancelId: 0,
+            };
+            const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+            return result.response === 1;
+          });
+        }
         // Generate VapourSynth script
         qlog('Generating VapourSynth script');
         
