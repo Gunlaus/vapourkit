@@ -316,11 +316,15 @@ class ModelRuntimeTests(unittest.TestCase):
     def test_generic_builder_does_not_run_rgb_validation_or_require_app_gpu_identity(self):
         source = self.root / 'wrapper.onnx'; model(source)
         target = self.root / 'wrapper.engine'
-        def build(opts): Path(opts['save_engine']).write_bytes(b'wrapper engine'); return 0
+        def build(opts):
+            Path(opts['save_engine']).write_bytes(b'wrapper engine')
+            opts['_pending_blacklist'] = (str(self.root / 'wrapper-blacklist.txt'), b'learned node')
+            return 0
         with patch.dict(sys.modules, {'tensorrt': types.SimpleNamespace()}), patch.object(builder, 'build', build), patch.object(runtime, 'validate_engine', side_effect=AssertionError('Generic wrapper must stay outside RGB validation')), patch.object(runtime, 'runtime_identity', side_effect=AssertionError('Generic wrapper must not require app GPU identity')):
             self.assertEqual(builder.main(['--onnx=' + str(source), '--saveEngine=' + str(target)]), 0)
             self.assertEqual(builder.blacklist_path_for({'save_engine':str(target)}, 'graph', 'fp16').name, 'graph_fp16.txt')
         self.assertEqual(target.read_bytes(), b'wrapper engine')
+        self.assertEqual((self.root / 'wrapper-blacklist.txt').read_bytes(), b'learned node')
         self.assertFalse(Path(str(target) + '.json').exists())
 
     def test_cpu_reference_timeout_and_input_budget_fail_explicitly(self):

@@ -232,7 +232,8 @@ def compatibility_identity(identity):
 
 def engine_rejection(manifest, contract, identity, shape, precision, engine):
     if not manifest: return 'missing or invalid validation manifest'
-    accuracy = manifest.get('validation', {}).get('accuracy')
+    validation = manifest.get('validation')
+    accuracy = validation.get('accuracy') if isinstance(validation, dict) else None
     if not isinstance(accuracy, dict) or accuracy.get('status') != 'passed': return 'cached engine lacks completed numerical validation'
     if manifest['contract'] != contract: return 'model source, weights, or adapter contract changed'
     saved, current = compatibility_identity(manifest['runtime']), compatibility_identity(identity)

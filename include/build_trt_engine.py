@@ -1715,7 +1715,12 @@ def main(argv):
         if opts.get('adapter') != 'rgb-window-v1':
             # vs-mlrt owns RIFE/DPIR and other custom wrapper contracts.
             status = build(opts)
-            if not status: report_progress(100)
+            if not status:
+                if opts.get('_pending_blacklist'):
+                    file, content = opts['_pending_blacklist']
+                    try: atomic_write_bytes(file, content)
+                    except OSError as error: print('Warning: could not save precision cache: ' + str(error), file=sys.stderr)
+                report_progress(100)
             return status
         target = opts['save_engine']
         candidate = target + '.candidate-' + str(os.getpid())
