@@ -126,6 +126,26 @@ describe('VSRepo dependency and package layout regressions', () => {
     expect((await service.listRepository(false))[0].installed).toBe(true);
     expect(await fs.readFile(path.join(root,'scripts','pkg','helper.py'))).toEqual(content);
   });
+  it('mirrors verified existing script files while publishing only missing files', async () => {
+    const files = { 'pkg/__init__.py': ['archive-1/src/init.py',sha], 'pkg/helper.py': ['archive-1/lib.py',sha] };
+    registry = { 'file-format':3, packages:[{ name:'Package script', identifier:'test.pkg', type:'PyScript', modulename:'pkg', releases:[{version:'1',script:{url:binary.url,files}}] }] };
+    archiveFiles(['archive-1/src/init.py','archive-1/lib.py']);
+    const existing = path.join(root,'scripts/pkg/__init__.py');
+    await fs.outputFile(existing,content); await fs.utimes(existing,new Date(1000000),new Date(1000000));
+    const before = (await fs.stat(existing)).mtimeMs;
+    mocks.exec.mockImplementation((_python,args,_options,done) => {
+      if (args[2].includes('result=[]')) {
+        const spec = JSON.parse(args[3]);
+        expect(fs.existsSync(path.join(spec.stagedScripts,'pkg/__init__.py'))).toBe(true);
+        expect(fs.existsSync(path.join(spec.stagedScripts,'pkg/helper.py'))).toBe(true);
+      }
+      done(null,'[]','');
+    });
+    const service = await import('./filterRepository'); await service.listRepository(true);
+    await service.installRepositoryPackage('test.pkg');
+    expect((await fs.stat(existing)).mtimeMs).toBe(before);
+    expect(await fs.readFile(path.join(root,'scripts/pkg/helper.py'))).toEqual(content);
+  });
   it('resolves exact identifiers before a different package with the same namespace', async () => {
     registry = { 'file-format':3, packages:[{ ...entry,identifier:'another.descale',namespace:'descale',dependencies:['missing'] },{ ...entry,identifier:'descale' }] };
     const service = await import('./filterRepository'); await service.listRepository(true);
