@@ -1287,6 +1287,7 @@ function App() {
 
       {/* Modals */}
       <AppModals
+        onModelsUpdated={async () => { await loadModels(); await loadUninitializedModels(); }}
         showImportModal={showImportModal}
         onCloseImportModal={() => closeModalWithFocusRestore(() => setShowImportModal(false))}
         isImporting={isImporting}

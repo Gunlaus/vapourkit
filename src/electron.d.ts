@@ -52,6 +52,8 @@ export interface RocmSettingResult {
 }
 
 export interface ElectronAPI {
+  listCatalogModels: () => Promise<import('../electron/componentCatalog').ComponentSnapshot>;
+  installCatalogModel: (request: { id: string; version: string; experimental: boolean; accepted: boolean }) => Promise<{ message: string }>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;

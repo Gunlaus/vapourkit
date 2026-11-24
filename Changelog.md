@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Models supplied with the app
+- Browse the model catalog bundled with this release. Every installation requires consent showing the creator, source, linked licence, download size and file hashes.
+- Verify model downloads, retain previous model versions and workflows, and record installed model versions in installed-components.json.
+- The catalog installs models only. It does not fetch a remote catalog or replace FFmpeg, Python runtimes, filters or pinned dependencies.
+
 ### Model preparation
 - Import complete ONNX packages, resolve symbolic RGB layouts, and prepare TensorRT engines for the dimensions entering each model.
 - Validate managed RGB candidates before publishing, preserve working engines on failure, and reuse compatible engines under a cross-process build lock.
