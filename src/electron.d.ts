@@ -52,6 +52,7 @@ export interface RocmSettingResult {
 }
 
 export interface ElectronAPI {
+  checkEncodingSupport: (request: { encoder: import('../electron/encodingSupportTypes').NvencEncoder; pixelFormat: string }) => Promise<import('../electron/encodingSupportTypes').EncodingSupport>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;
@@ -497,6 +498,7 @@ export interface PreviewFrameResult {
 }
 
 export interface VideoInfo {
+  tracks?: import('../electron/mediaTracks').ContainerTrack[];
   path: string;
   name: string;
   size: number;

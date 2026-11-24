@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Guided encoding and container tracks
+- Simple encoding exposes bitrate/quality, keyframes, audio and codec-specific settings; Advanced starts from the current Simple controls.
+- Select which source audio/subtitle tracks to retain, with selections saved in workflows and queue items.
+- NVENC capability checks explain common failures and offer CPU recovery. A failed default-options preflight is advisory, with an explicit Continue anyway option.
+
 ### Choose which GPU runs inference
 Settings → Inference Backend → GPU picks the GPU, and every backend uses it. Until now each backend took its API's first GPU, and those differ: DirectML and NCNN often landed on a laptop's integrated GPU while TensorRT used the NVIDIA one.
 - TensorRT, MIGraphX and PyTorch-based filters see only the chosen GPU, so engine and program builds happen on it too

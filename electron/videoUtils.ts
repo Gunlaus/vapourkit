@@ -1,3 +1,4 @@
+import { parseContainerTracks, type ContainerTrack } from './mediaTracks';
 import { logger } from './logger';
 import { FFmpegManager } from './ffmpegManager';
 import { PATHS } from './constants';
@@ -14,6 +15,7 @@ const execFileAsync = promisify(execFile);
 
 /** What the app displays about a source, parsed from `ffmpeg -i`. */
 export interface VideoDisplayMetadata {
+  tracks?: ContainerTrack[];
   resolution?: string;
   fps?: number;
   pixelFormat?: string;
@@ -74,7 +76,7 @@ export async function probeVideo(filePath: string): Promise<VideoProbe> {
   try {
     const output = await runFfmpegProbe(filePath);
     if (output === null) return { display: {}, streams: null };
-    return { display: parseDisplayMetadata(output), streams: parseVideoMetadata(output) };
+    return { display: { ...parseDisplayMetadata(output), tracks: parseContainerTracks(output) }, streams: parseVideoMetadata(output) };
   } catch (probeError) {
     logger.error('Error extracting video metadata with ffmpeg:', probeError);
     return { display: {}, streams: null };
