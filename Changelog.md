@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Model preparation
+- Import complete ONNX packages, resolve symbolic RGB layouts, and prepare TensorRT engines for the dimensions entering each model.
+- Validate managed RGB candidates before publishing, preserve working engines on failure, and reuse compatible engines under a cross-process build lock.
+- Identify CUDA's selected visible GPU without requiring an active context. Keep same-named model packages' metadata separate.
+- Compare against a pinned CPU ONNX Runtime in a separate process with a 60-second timeout, bounded input/output data, and limited CPU threads. Reference failures are explicit; generic vs-mlrt RIFE/DPIR builds retain their existing path.
+
 ### Choose which GPU runs inference
 Settings → Inference Backend → GPU picks the GPU, and every backend uses it. Until now each backend took its API's first GPU, and those differ: DirectML and NCNN often landed on a laptop's integrated GPU while TensorRT used the NVIDIA one.
 - TensorRT, MIGraphX and PyTorch-based filters see only the chosen GPU, so engine and program builds happen on it too

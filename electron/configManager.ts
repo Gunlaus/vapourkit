@@ -1,3 +1,4 @@
+import { modelMetadataKey } from './modelIdentity';
 // electron/configManager.ts
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -375,21 +376,21 @@ export class ConfigManager {
   }
 
   isModelFp32(modelPath: string): boolean {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Use metadata from config, default to false (fp16) if not found
     return metadata?.useFp32 ?? false;
   }
 
   getModelType(modelPath: string): ModelType {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Return stored model type, default to 'image' as it's the most common type
     return metadata?.modelType || 'image';
   }
 
   getTemporalFrames(modelPath: string): number {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Return temporal frames count, default to 5 for backward compatibility
     return metadata?.temporalFrames ?? 5;

@@ -573,6 +573,8 @@ export interface InitializeModelResult {
 }
 
 export interface ValidateOnnxModelResult {
+  contract?: import('../electron/modelContract').ModelContract;
+  compatibilityError?: string;
   isValid: boolean;
   error?: string;
   inputShape?: number[];
@@ -596,6 +598,7 @@ export interface ModelInitProgress {
 }
 
 export interface ImportModelParams {
+  deferBuild?: boolean;
   onnxPath: string;
   modelName: string;
   minShapes: string;
