@@ -133,7 +133,7 @@ export async function installRepositoryPackage(id: string): Promise<{ message: s
     const targetRoot = path.join(stage, 'target');
     const stagedPlugins = path.join(targetRoot, 'plugins');
     const stagedScripts = path.join(targetRoot, 'scripts');
-    const files: { source: string; target: string; kind: string; module?: string }[] = [];
+    const files: { source: string; target: string; kind: string; module?: string; publish: boolean }[] = [];
     for (const p of work) {
       const chosen = checkedArtifact(p);
       const url = new URL(chosen.asset.url);
@@ -169,14 +169,12 @@ export async function installRepositoryPackage(id: string): Promise<{ message: s
         const base = packageBase(p);
         const destination = path.join(base, target);
         if (files.some(f => f.target.toLowerCase() === destination.toLowerCase())) throw new Error('Dependency file collision: ' + target);
-        if (await fs.pathExists(destination)) {
-          if (await fileDigest(destination) === sha) continue;
-          throw new Error('Existing plugin/script would be overwritten: ' + target + '. Keep your current version or manage it explicitly.');
-        }
+        const publish = !await fs.pathExists(destination);
+        if (!publish && await fileDigest(destination) !== sha) throw new Error('Existing plugin/script would be overwritten: ' + target + '. Keep your current version or manage it explicitly.');
         const mirrored = path.join(p.type === 'PyScript' ? stagedScripts : stagedPlugins, target);
         await fs.ensureDir(path.dirname(mirrored));
         await fs.copy(source, mirrored, { overwrite: false, errorOnExist: true });
-        files.push({ source: mirrored, target: destination, kind: p.type, module: p.modulename });
+        files.push({ source: mirrored, target: destination, kind: p.type, module: p.modulename, publish });
       }
     }
     const native = files.filter(f => f.kind === 'VSPlugin' && /\.(dll|so)$/i.test(f.source)).map(f => f.source);
@@ -195,6 +193,7 @@ for plugin in vs.core.plugins():
 print(json.dumps(result))`, [JSON.stringify({ native, folders: [...new Set([PATHS.PLUGINS, ...files.map(f => path.dirname(f.source))])], scripts, scriptsPath: PATHS.SCRIPTS, stagedScripts, requiredIds: root.type === 'VSPlugin' && root.namespace ? [root.identifier] : [], ids: work.map(p => p.identifier) })]);
     // Publish without replacing anything already loaded by a running workflow.
     for (const file of files) {
+      if (!file.publish) continue;
       await fs.ensureDir(path.dirname(file.target));
       await fs.copy(file.source, file.target, { overwrite: false, errorOnExist: true });
       published.push(file.target);
