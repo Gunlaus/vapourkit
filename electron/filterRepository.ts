@@ -67,6 +67,9 @@ async function refreshInstalled(): Promise<void> {
 function plan(root: Package): Package[] {
   const result: Package[] = []; const visiting = new Set<string>(); const done = new Set<string>();
   const visit = (p: Package) => {
+    // A pinned package already available in the runtime may satisfy a dependency,
+    // but the browser never installs or replaces that package itself.
+    if (p !== root && packageBlockReason(p) && installed.has(p.identifier)) return;
     checkedArtifact(p);
     if (done.has(p.identifier) || installed.has(p.identifier)) return;
     if (visiting.has(p.identifier)) throw new Error('The registry contains a dependency cycle.');

@@ -141,6 +141,18 @@ describe('VSRepo dependency and package layout regressions', () => {
     for (const row of rows) await expect(service.installRepositoryPackage(row.id)).rejects.toThrow();
     expect(mocks.download.mock.calls.length).toBe(downloads);
   });
+  it('uses an already installed app-managed dependency without offering to install or replace it', async () => {
+    const managed = 'com.vapoursynth.bestsource';
+    registry = { 'file-format':3,packages:[{...entry,identifier:managed},{...entry,identifier:'dependent',dependencies:[managed]}] };
+    mocks.exec.mockImplementation((_python,args,_options,done) => done(null,args[2].includes('result=[]') ? '[]' : JSON.stringify([managed]),''));
+    const service = await import('./filterRepository');
+    const rows = await service.listRepository(true);
+    expect(rows.find(row => row.id === managed)?.compatible).toBe(false);
+    expect(rows.find(row => row.id === 'dependent')?.compatible).toBe(true);
+    const before = mocks.download.mock.calls.length;
+    await service.installRepositoryPackage('dependent');
+    expect(mocks.download.mock.calls.length - before).toBe(1);
+  });
   it('does not turn non-video return values into single-clip filter templates', async () => {
     mocks.exec.mockImplementation((_python,args,_options,done) => done(null,args[2].includes('result=[]') ? JSON.stringify([{namespace:'newblur',functions:[{name:'Measure',signature:'clip:vnode;',returns:'value:int;'}]}]) : '[]',''));
     const service = await import('./filterRepository'); await service.listRepository(true);
