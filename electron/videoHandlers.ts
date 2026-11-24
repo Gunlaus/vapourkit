@@ -390,6 +390,7 @@ export function registerVideoHandlers(
         });
       }
       
+      let temporaryScript: string | null = null;
       try {
         executor.onDiagnostic = message => itemLogger.write(message);
         // Generate VapourSynth script
@@ -402,6 +403,7 @@ export function registerVideoHandlers(
         }
 
         const scriptPath = await scriptGenerator.generateScript(config);
+        temporaryScript = scriptPath;
         qlog(`Script generated: ${scriptPath}`);
 
         // Log script content to per-item log for troubleshooting
@@ -458,10 +460,6 @@ export function registerVideoHandlers(
         qlog('Starting execution');
         await executor.execute(scriptPath, outputPath, videoPath, { source: sourceProbe.streams, output: outputInfo }, segment?.enabled ? segment : undefined, fps, benchmarkMode);
 
-        // Cleanup
-        qlog('Cleaning up script file');
-        await scriptGenerator.cleanupScript(scriptPath);
-
         qlog('Processing completed successfully');
         return { success: true, outputPath };
       } catch (error) {
@@ -474,8 +472,9 @@ export function registerVideoHandlers(
         } else {
           qerror(`Processing failed: ${errorMsg}`);
         }
-        return { success: false, error: errorMsg };
+        return { success: false, error: executor.isStopped ? 'Canceled' : errorMsg };
       } finally {
+        if (temporaryScript) await scriptGenerator.cleanupScript(temporaryScript).catch(error => logger.warn('Script cleanup deferred:', error));
         upscaleJob.release(job);
         drainingUpscales.delete(executor);
         itemLogger.close();
