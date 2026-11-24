@@ -833,3 +833,10 @@ it('preserves a user-kept script template during generation', async () => {
     expect(await fs.readFile(installed, 'utf8')).toBe(original + '\n# user kept template\n');
   } finally { await fs.writeFile(installed, original); }
 });
+
+it('stages the model helper safely for concurrent preview and render generation', async () => {
+  const generator = new VapourSynthScriptGenerator('win32');
+  const scripts = await Promise.all(Array.from({length:4},() => generator.generateScript({inputVideo:'C:/input.mkv',filters:[]})));
+  expect(new Set(scripts).size).toBe(4);
+  await Promise.all(scripts.map(file => fs.remove(file)));
+});

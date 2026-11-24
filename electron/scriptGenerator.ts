@@ -331,9 +331,15 @@ export class VapourSynthScriptGenerator {
     if (await fs.pathExists(helperSource)) {
       await fs.ensureDir(PATHS.CONFIG);
       const content = await fs.readFile(helperSource);
-      const staged = path.join(PATHS.CONFIG, helper + '.' + process.pid + '.tmp');
-      await fs.writeFile(staged, content);
-      await fs.move(staged, path.join(PATHS.CONFIG, helper), { overwrite: true });
+      const target = path.join(PATHS.CONFIG, helper);
+      const current = await fs.readFile(target).catch(() => null);
+      if (!current?.equals(content)) {
+        const staged = `${target}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`;
+        try {
+          await fs.writeFile(staged, content);
+          await fs.rename(staged, target);
+        } finally { await fs.remove(staged); }
+      }
     }
     for (const file of RUNTIME_FILES) {
       const target = path.join(PATHS.CONFIG, file);
