@@ -1,3 +1,4 @@
+import { setPreviewEnabled } from './previewSettings';
 import { ipcMain, BrowserWindow, shell, MessageChannelMain, type MessagePortMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -161,6 +162,8 @@ export function registerVideoHandlers(
    * app's build banner. A cancel, or a newer evaluation, kills it, and the
    * result then carries the error that left.
    */
+  handleValidated('set-preview-enabled', z.boolean(), async enabled => { setPreviewEnabled(enabled); return { success: true }; });
+
   const evaluateScript = async (scriptPath: string): Promise<OutputInfo> => {
     const vspipePath = dependencyManager.getVSPipePath();
     const extractor = new VapourSynthInfoExtractor(
@@ -388,6 +391,7 @@ export function registerVideoHandlers(
       }
       
       try {
+        executor.onDiagnostic = message => itemLogger.write(message);
         // Generate VapourSynth script
         qlog('Generating VapourSynth script');
         

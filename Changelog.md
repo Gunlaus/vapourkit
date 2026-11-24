@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Preview and queue controls
+- Toggle preview without losing the pane, choose encoding-preview height/FPS, and keep the console within the preview area.
+- Apply current settings to all pending jobs; new queue items wait for saved settings to load. Canceling a model/filter picker leaves no empty chain item, and output naming avoids collisions.
+- Session restoration remains the default; fresh startup is an opt-in preference.
+
+### Processing diagnostics
+- Validate the Matroska stream header and parse FFmpeg's structured progress. Report the underlying VapourSynth error when a producer exits before writing video.
+- Track actual processing outcomes, validate imported filter declarations, cache Linux site-packages discovery, and support the packaged application's --version command.
+
 ### Choose which GPU runs inference
 Settings → Inference Backend → GPU picks the GPU, and every backend uses it. Until now each backend took its API's first GPU, and those differ: DirectML and NCNN often landed on a laptop's integrated GPU while TensorRT used the NVIDIA one.
 - TensorRT, MIGraphX and PyTorch-based filters see only the chosen GPU, so engine and program builds happen on it too

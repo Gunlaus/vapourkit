@@ -163,9 +163,10 @@ export class VapourSynthScriptGenerator {
       if (!declaration) return match;
 
       const value = filter.parameters?.[key] ?? declaration.default;
+      if (value === undefined || (declaration.type && typeof value !== declaration.type) || (typeof value === 'number' && !Number.isFinite(value))) throw new Error(`Filter "${filter.preset || filter.id}": invalid value for "${key}". Correct the filter parameters or variable declaration.`);
       if (typeof value === 'number') return Number.isFinite(value) ? String(value) : match;
       if (typeof value === 'boolean') return value ? 'True' : 'False';
-      if (typeof value === 'string') return pyString(value);
+      if (typeof value === 'string') return JSON.stringify(value);
       return match;
     });
   }
@@ -551,6 +552,7 @@ export class VapourSynthScriptGenerator {
       template = template.replace(/clip\.set_output\(\)\s*$/, '');
     }
 
+    template = 'import sys as _vk_sys\n_vk_sys.stdout = _vk_sys.stderr\n' + template;
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
     logger.info(`Generated script: ${tempScriptPath}`);

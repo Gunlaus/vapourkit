@@ -29,7 +29,7 @@ describe('the ffmpeg encode', () => {
     const args = build();
     const pipe = args.indexOf('pipe:0');
     expect(args.slice(0, pipe + 1)).toEqual([
-      '-hide_banner', '-f', 'matroska',
+      '-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', '-f', 'matroska',
       '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
       '-i', 'pipe:0',
     ]);
@@ -40,7 +40,7 @@ describe('the ffmpeg encode', () => {
   it('tags no YUV colour on an RGB output, float RGB included', () => {
     for (const pixelFormat of ['RGB24', 'RGBS', 'RGBH']) {
       const args = build({ outputInfo: { ...cfr, pixelFormat } });
-      expect(args.slice(0, args.indexOf('pipe:0') + 1)).toEqual(['-hide_banner', '-f', 'matroska', '-i', 'pipe:0']);
+      expect(args.slice(0, args.indexOf('pipe:0') + 1)).toEqual(['-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', '-f', 'matroska', '-i', 'pipe:0']);
     }
   });
 
@@ -92,7 +92,7 @@ describe('the ffmpeg encode', () => {
 
   it('decodes the pipe into the null muxer in benchmark mode', () => {
     expect(build({ benchmarkMode: true, outputInfo: { ...cfr, pixelFormat: 'RGBS' } })).toEqual([
-      '-hide_banner', '-f', 'matroska', '-i', 'pipe:0', '-f', 'null', '-',
+      '-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', '-f', 'matroska', '-i', 'pipe:0', '-f', 'null', '-',
     ]);
   });
 });

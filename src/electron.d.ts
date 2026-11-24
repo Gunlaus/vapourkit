@@ -52,6 +52,9 @@ export interface RocmSettingResult {
 }
 
 export interface ElectronAPI {
+  getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
+  setPipelineSettings: (settings: import('../electron/pipelineSettings').PipelineSettings) => Promise<void>;
+  setPreviewEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;
@@ -277,7 +280,7 @@ export interface ElectronAPI {
   saveFilterTemplate: (template: FilterTemplate) => Promise<{ success: boolean; error?: string }>;
   deleteFilterTemplate: (name: string) => Promise<{ success: boolean; error?: string }>;
   readTemplateFile: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
-  importTemplateFile: (filePath: string) => Promise<{ success: boolean; template?: FilterTemplate; error?: string }>;
+  importTemplateFile: (filePath: string) => Promise<{ success: boolean; template?: FilterTemplate; error?: string; warnings?: string[] }>;
   
   // Model category operations
   getModelCategories: () => Promise<string[]>;
