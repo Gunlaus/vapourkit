@@ -124,6 +124,8 @@ export function getPypiPackages(vendor: GpuVendor): string[] {
   const isNvidia = vendor === 'nvidia';
   return [
     VAPOURSYNTH_PIP_SPEC,
+    // Included in launch-time requirement reconciliation as well as fresh installs.
+    ...(isNvidia ? ['onnxruntime==1.23.2'] : []),
     getVsJetpackSpec(vendor),
     `vsview[full]>=${VSVIEW_MIN_VERSION}`,
     'vs_temporalfix',

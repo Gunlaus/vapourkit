@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Browse more VapourSynth filters
+- The VS filter picker can browse VSRepo, show API/platform compatibility and source links, and install compatible plugins or scripts with their dependencies.
+- Downloads are hash-checked and tested in a temporary Python process before publication. Existing files are preserved, verified dependencies are reused, and app-managed inference packages and BestSource stay under Vapourkit's installer.
+
+### Guided encoding and container tracks
+- Simple encoding exposes bitrate/quality, keyframes, audio and codec-specific settings; Advanced starts from the current Simple controls.
+- Select which source audio/subtitle tracks to retain, with selections saved in workflows and queue items.
+- NVENC capability checks explain common failures and offer CPU recovery. A failed default-options preflight is advisory, with an explicit Continue anyway option.
+
+### Preview and queue controls
+- Toggle preview without losing the pane, choose encoding-preview height/FPS, and keep the console within the preview area.
+- Apply current settings to all pending jobs; new queue items wait for saved settings to load. Canceling a model/filter picker leaves no empty chain item, and output naming avoids collisions.
+- Session restoration remains the default; fresh startup is an opt-in preference.
+
+### Processing diagnostics
+- Validate the Matroska stream header and parse FFmpeg's structured progress. Report the underlying VapourSynth error when a producer exits before writing video.
+- Track actual processing outcomes, validate imported filter declarations, cache Linux site-packages discovery, and support the packaged application's --version command.
+### Models supplied with the app
+- Browse the model catalog bundled with this release. Every installation requires consent showing the creator, source, linked licence, download size and file hashes.
+- Verify model downloads, retain previous model versions and workflows, and record installed model versions in installed-components.json.
+- The catalog installs models only. It does not fetch a remote catalog or replace FFmpeg, Python runtimes, filters or pinned dependencies.
+
+### Model preparation
+- Import complete ONNX packages, resolve symbolic RGB layouts, and prepare TensorRT engines for the dimensions entering each model.
+- Validate managed RGB candidates before publishing, preserve working engines on failure, and reuse compatible engines under a cross-process build lock.
+- Identify CUDA's selected visible GPU without requiring an active context. Keep same-named model packages' metadata separate.
+- Compare against a pinned CPU ONNX Runtime in a separate process with a 60-second timeout, bounded input/output data, and limited CPU threads. Reference failures are explicit; generic vs-mlrt RIFE/DPIR builds retain their existing path.
+### Build verification
+- Build Windows x64 installer and portable packages in CI, print their SHA256 hashes, and smoke-test the packaged executable's --version command.
+- Run model unit tests against local generated fixtures when present. Live registry/model downloads and benchmarks remain outside default CI.
+- Keep Windows basename handling consistent in the cross-platform unit suite.
+
 ### Choose which GPU runs inference
 Settings → Inference Backend → GPU picks the GPU, and every backend uses it. Until now each backend took its API's first GPU, and those differ: DirectML and NCNN often landed on a laptop's integrated GPU while TensorRT used the NVIDIA one.
 - TensorRT, MIGraphX and PyTorch-based filters see only the chosen GPU, so engine and program builds happen on it too

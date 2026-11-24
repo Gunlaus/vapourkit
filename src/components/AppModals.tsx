@@ -13,6 +13,7 @@ import { FilterImportModal } from './FilterImportModal';
 import type { BackendId, DiscordRichPresenceSettings, UpdateInfo, VsMlrtVersionInfo } from '../electron';
 
 interface AppModalsProps {
+  onModelsUpdated?: () => Promise<void>;
   // Import Model
   showImportModal: boolean;
   onCloseImportModal: () => void;
@@ -125,6 +126,7 @@ export const AppModals = memo(function AppModals(props: AppModalsProps) {
       />
 
       <SettingsModal
+        onModelsUpdated={props.onModelsUpdated}
         show={props.showSettings}
         onClose={props.onCloseSettings}
         defaultBackend={props.defaultBackend}

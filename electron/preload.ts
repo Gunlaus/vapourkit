@@ -2,8 +2,12 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  setPipelineSettings: (settings: import('./pipelineSettings').PipelineSettings) => ipcRenderer.invoke('set-pipeline-settings', settings),
+  setPreviewEnabled: (enabled: boolean) => ipcRenderer.invoke('set-preview-enabled', enabled),
   // Dependency management
   platform: process.platform,
+  checkEncodingSupport: (request: { encoder: string; pixelFormat: string }) => ipcRenderer.invoke('check-encoding-support', request),
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   getNvencDriverProblem: () => ipcRenderer.invoke('get-nvenc-driver-problem'),
   detectCudaSupport: () => ipcRenderer.invoke('detect-cuda-support'),
@@ -209,6 +213,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Backend operations
   reloadBackend: () => ipcRenderer.invoke('reload-backend'),
   
+  listFilterRepository: (refresh: boolean) => ipcRenderer.invoke('filter-repository-list', refresh),
+  installRepositoryFilter: (id: string) => ipcRenderer.invoke('filter-repository-install', id),
   // Filter template operations
   getFilterTemplates: () => ipcRenderer.invoke('get-filter-templates'),
   saveFilterTemplate: (template: any) => ipcRenderer.invoke('save-filter-template', template),
@@ -245,6 +251,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('plugin-dependency-progress', listener);
   },
   
+  listCatalogModels: () => ipcRenderer.invoke('model-catalog-list'),
+  installCatalogModel: (request: { id: string; version: string; experimental: boolean; accepted: boolean }) => ipcRenderer.invoke('model-catalog-install', request),
   // Update operations
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   openReleasesPage: () => ipcRenderer.invoke('open-releases-page'),

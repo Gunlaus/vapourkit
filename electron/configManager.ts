@@ -1,3 +1,5 @@
+import { pipelineSettingsSchema, type PipelineSettings } from './pipelineSettings';
+import { modelMetadataKey } from './modelIdentity';
 // electron/configManager.ts
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -33,6 +35,7 @@ interface Filter {
 }
 
 interface AppConfig {
+  pipeline?: PipelineSettings;
   colorimetry?: {
     overwriteMatrix: boolean;
     matrix709: boolean;
@@ -375,24 +378,34 @@ export class ConfigManager {
   }
 
   isModelFp32(modelPath: string): boolean {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Use metadata from config, default to false (fp16) if not found
     return metadata?.useFp32 ?? false;
   }
 
   getModelType(modelPath: string): ModelType {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Return stored model type, default to 'image' as it's the most common type
     return metadata?.modelType || 'image';
   }
 
   getTemporalFrames(modelPath: string): number {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Return temporal frames count, default to 5 for backward compatibility
     return metadata?.temporalFrames ?? 5;
+  }
+
+  getPipelineSettings(): PipelineSettings {
+    const parsed = pipelineSettingsSchema.safeParse(this.config.pipeline ?? {});
+    return parsed.success ? parsed.data : pipelineSettingsSchema.parse({});
+  }
+
+  async setPipelineSettings(settings: PipelineSettings): Promise<void> {
+    this.config.pipeline = pipelineSettingsSchema.parse(settings);
+    await this.save();
   }
 
   getColorimetrySettings(): { overwriteMatrix: boolean; matrix709: boolean; defaultMatrix: '709' | '170m'; defaultPrimaries: '709' | '601'; defaultTransfer: '709' | '170m' } {
