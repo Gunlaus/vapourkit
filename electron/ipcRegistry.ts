@@ -1,3 +1,4 @@
+import { registerFilterRepositoryHandlers } from './filterRepositoryHandlers';
 import { registerAlignHandlers } from './alignHandlers';
 import { BrowserWindow } from 'electron';
 import { registerDialogHandlers } from './dialogHandlers';
@@ -30,6 +31,7 @@ export function registerAllIpcHandlers(
 ) {
   // Register all handler groups
   registerDialogHandlers();
+  registerFilterRepositoryHandlers();
   registerModelHandlers(mainWindow);
   registerVideoHandlers(mainWindow, scriptGenerator, dependencyManager);
   registerConfigHandlers(mainWindow);

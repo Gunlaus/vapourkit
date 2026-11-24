@@ -177,6 +177,12 @@ export class TemplateManager {
     }
   }
 
+  /** Roll back a newly created template without recording a user deletion. */
+  async rollbackCreatedTemplate(name: string): Promise<void> {
+    const filePath = await this.resolveTemplatePath(name);
+    if (await fs.pathExists(filePath)) await fs.remove(filePath);
+  }
+
   /**
    * Deletes a filter template
    */

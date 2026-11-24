@@ -1217,6 +1217,7 @@ function App() {
                     onSaveTemplate={saveTemplate}
                     onDeleteTemplate={deleteTemplate}
                     onRestoreTemplates={restoreTemplates}
+                    onRefreshTemplates={loadTemplates}
                     onOpenFilterEditor={handleOpenFilterEditor}
                     lut={lutPanel}
                     beginStepPatch={beginStepPatch}
