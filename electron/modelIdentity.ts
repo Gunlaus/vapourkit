@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 
 /** Keep legacy root names; package-relative paths distinguish immutable imports. */
 export function modelMetadataKey(file: string, modelsRoot: string): string {
-  const paths = file.includes('\\') || path.win32.isAbsolute(file) ? path.win32 : path.posix;
+  const paths = file.includes('\\') || /^[a-z]:/i.test(file) ? path.win32 : path.posix;
   const stem = paths.basename(file, paths.extname(file));
   const relative = paths.isAbsolute(file) ? paths.relative(modelsRoot, file) : file;
   if (relative === '..' || relative.startsWith('..' + paths.sep) || paths.isAbsolute(relative)) {

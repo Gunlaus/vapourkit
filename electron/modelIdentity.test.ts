@@ -14,6 +14,10 @@ describe('model package metadata identities', () => {
       expect(modelMetadataKey(root + '/packages/anime-aaaa/anime.engine',root)).toBe(first);
     }
   });
+  it('respects case-sensitive POSIX roots', () => {
+    expect(modelMetadataKey('/App/models/anime.onnx','/app/models')).toMatch(/^external\//);
+    expect(modelMetadataKey('/app/models/anime.onnx','/app/models')).toBe('anime');
+  });
   it('also separates external models with identical basenames', () => {
     expect(modelMetadataKey('/one/anime.onnx','/app/models')).not.toBe(modelMetadataKey('/two/anime.onnx','/app/models'));
   });
