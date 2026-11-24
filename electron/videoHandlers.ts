@@ -1,5 +1,6 @@
 import { nvencPreflight } from './nvencPreflight';
 import { nvencEncoderOf } from './encodingSupport';
+import { setPreviewEnabled } from './previewSettings';
 import { ipcMain, BrowserWindow, shell, dialog, MessageChannelMain, type MessagePortMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -163,6 +164,8 @@ export function registerVideoHandlers(
    * app's build banner. A cancel, or a newer evaluation, kills it, and the
    * result then carries the error that left.
    */
+  handleValidated('set-preview-enabled', z.boolean(), async enabled => { setPreviewEnabled(enabled); return { success: true }; });
+
   const evaluateScript = async (scriptPath: string): Promise<OutputInfo> => {
     const vspipePath = dependencyManager.getVSPipePath();
     const extractor = new VapourSynthInfoExtractor(
@@ -390,7 +393,9 @@ export function registerVideoHandlers(
         });
       }
       
+      let temporaryScript: string | null = null;
       try {
+        executor.onDiagnostic = message => itemLogger.write(message);
         const nvenc = nvencEncoderOf(configManager.getFfmpegArgs());
         if (nvenc && !benchmarkMode) {
           const ffmpeg = FFmpegManager.getFFmpegPath();
@@ -416,6 +421,7 @@ export function registerVideoHandlers(
         }
 
         const scriptPath = await scriptGenerator.generateScript(config);
+        temporaryScript = scriptPath;
         qlog(`Script generated: ${scriptPath}`);
 
         // Log script content to per-item log for troubleshooting
@@ -472,10 +478,6 @@ export function registerVideoHandlers(
         qlog('Starting execution');
         await executor.execute(scriptPath, outputPath, videoPath, { source: sourceProbe.streams, output: outputInfo }, segment?.enabled ? segment : undefined, fps, benchmarkMode);
 
-        // Cleanup
-        qlog('Cleaning up script file');
-        await scriptGenerator.cleanupScript(scriptPath);
-
         qlog('Processing completed successfully');
         return { success: true, outputPath };
       } catch (error) {
@@ -488,8 +490,9 @@ export function registerVideoHandlers(
         } else {
           qerror(`Processing failed: ${errorMsg}`);
         }
-        return { success: false, error: errorMsg };
+        return { success: false, error: executor.isStopped ? 'Canceled' : errorMsg };
       } finally {
+        if (temporaryScript) await scriptGenerator.cleanupScript(temporaryScript).catch(error => logger.warn('Script cleanup deferred:', error));
         upscaleJob.release(job);
         drainingUpscales.delete(executor);
         itemLogger.close();

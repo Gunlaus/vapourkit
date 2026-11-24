@@ -1,3 +1,5 @@
+import { freshSessionOnStartup } from '../utils/startupSession';
+import { variablesWithParameters } from '../../electron/filterValidation';
 // src/hooks/useWorkflow.ts
 import { useState, useCallback, useEffect } from 'react';
 import type { Filter, FilterTemplate, WorkflowData } from '../electron.d';
@@ -74,6 +76,7 @@ export function useWorkflow({
   // and the settings from before the workflow were lost for good.
   const [workflowState, setWorkflowState] = useState<LoadedWorkflowRecord>(() => {
     try {
+      if (freshSessionOnStartup()) return NO_WORKFLOW;
       const saved = localStorage.getItem(LOADED_WORKFLOW_KEY);
       if (saved) return JSON.parse(saved) as LoadedWorkflowRecord;
     } catch {
@@ -269,7 +272,7 @@ export function useWorkflow({
             backend: filter.backend,
             numStreams: filter.numStreams,
             parameters: filter.parameters,
-            variables: filter.variables,
+            variables: variablesWithParameters(filter.variables, filter.parameters),
             editor: filter.editor,
           };
         }),
@@ -367,7 +370,7 @@ export function useWorkflow({
           code: filter.code,
           description: filter.description,
           category: filter.category,
-          variables: filter.variables,
+          variables: variablesWithParameters(filter.variables, filter.parameters),
           editor: filter.editor,
         });
       }

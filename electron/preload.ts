@@ -2,6 +2,9 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  setPipelineSettings: (settings: import('./pipelineSettings').PipelineSettings) => ipcRenderer.invoke('set-pipeline-settings', settings),
+  setPreviewEnabled: (enabled: boolean) => ipcRenderer.invoke('set-preview-enabled', enabled),
   // Dependency management
   platform: process.platform,
   checkEncodingSupport: (request: { encoder: string; pixelFormat: string }) => ipcRenderer.invoke('check-encoding-support', request),

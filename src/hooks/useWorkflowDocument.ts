@@ -1,3 +1,4 @@
+import { freshSessionOnStartup } from '../utils/startupSession';
 // src/hooks/useWorkflowDocument.ts - The window's workflow settings, and where each change is saved.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,8 +59,15 @@ interface UseWorkflowDocumentOptions {
  * project's are kept in localStorage too.
  */
 export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog, onItemChange }: UseWorkflowDocumentOptions) {
+  const [freshStartup] = useState(freshSessionOnStartup);
+  const [ready] = useState(() => {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+  });
+  const whenReady = useCallback(() => ready.promise, [ready]);
   // The item being edited when the app last closed, for App to go back to.
-  const [resumeEditingId] = useState(readEditingItemId);
+  const [resumeEditingId] = useState(() => freshStartup ? null : readEditingItemId());
 
   const onItemChangeRef = useRef(onItemChange);
   onItemChangeRef.current = onItemChange;
@@ -108,7 +116,7 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
 
   const [state, dispatch, getState] = useSyncReducer(
     workflowDocumentReducer,
-    loadDocument,
+    () => loadDocument(freshStartup),
     (next, previous) => {
       persistDocumentChange(next, previous, (itemId, workflow) => onItemChangeRef.current(itemId, workflow));
       syncConfig(next, getState);
@@ -116,7 +124,7 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
   );
 
   useEffect(() => {
-    adoptLegacySnapshot(getState());
+    if (!freshStartup) adoptLegacySnapshot(getState());
   }, [getState]);
 
   // Read the config-held settings once setup has finished.
@@ -127,6 +135,7 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
     void loadConfigSettings().then(values => {
       configRef.current = { ...values };
       dispatch({ type: 'loaded', values });
+      ready.resolve();
       onLogRef.current('Workflow settings loaded');
     });
   }, [isSetupComplete, dispatch]);
@@ -223,11 +232,12 @@ export function useWorkflowDocument({ isSetupComplete, recommendedBackend, onLog
     beginItemRender,
     endItemRender,
     whenConfigSaved,
+    whenReady,
     pendingItemSave,
     forgetResume,
   }), [view, state.project, editingItemId, shownItemId, state.session, state.loaded, state.epoch,
       state.history.past.length, state.history.future.length, resumeEditingId, getState, patch, undo, redo,
-      openItem, showProject, openSession, closeSession, beginItemRender, endItemRender, whenConfigSaved, pendingItemSave,
+      openItem, showProject, openSession, closeSession, beginItemRender, endItemRender, whenConfigSaved, whenReady, pendingItemSave,
       forgetResume]);
 }
 

@@ -1,3 +1,4 @@
+import { validateFilterTemplate } from './filterValidation';
 // electron/templateManager.ts
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -156,6 +157,7 @@ export class TemplateManager {
    */
   async saveTemplate(template: FilterTemplate): Promise<void> {
     try {
+      validateFilterTemplate(template);
       await this.ensureTemplatesDir();
       
       // Add metadata if not present

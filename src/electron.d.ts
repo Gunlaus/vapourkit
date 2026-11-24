@@ -55,6 +55,9 @@ export interface ElectronAPI {
   listFilterRepository: (refresh: boolean) => Promise<import('../electron/filterRepositoryTypes').RepositoryEntry[]>;
   installRepositoryFilter: (id: string) => Promise<{ message: string }>;
   checkEncodingSupport: (request: { encoder: import('../electron/encodingSupportTypes').NvencEncoder; pixelFormat: string }) => Promise<import('../electron/encodingSupportTypes').EncodingSupport>;
+  getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
+  setPipelineSettings: (settings: import('../electron/pipelineSettings').PipelineSettings) => Promise<void>;
+  setPreviewEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;
@@ -280,7 +283,7 @@ export interface ElectronAPI {
   saveFilterTemplate: (template: FilterTemplate) => Promise<{ success: boolean; error?: string }>;
   deleteFilterTemplate: (name: string) => Promise<{ success: boolean; error?: string }>;
   readTemplateFile: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
-  importTemplateFile: (filePath: string) => Promise<{ success: boolean; template?: FilterTemplate; error?: string }>;
+  importTemplateFile: (filePath: string) => Promise<{ success: boolean; template?: FilterTemplate; error?: string; warnings?: string[] }>;
   
   // Model category operations
   getModelCategories: () => Promise<string[]>;

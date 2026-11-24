@@ -2,7 +2,7 @@
     "name": "vapourkit-gui",
     "version": "2.1.0",
     "description": "Advanced GUI for VapourSynth and Video Upscaling",
-    "main": "dist/electron/main.js",
+    "main": "dist/electron/bootstrap.js",
     "scripts": {
         "dev": "npm run build:electron && concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
         "dev:vite": "vite",
