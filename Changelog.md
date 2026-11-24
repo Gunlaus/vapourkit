@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Build verification
+- Build Windows x64 installer and portable packages in CI, print their SHA256 hashes, and smoke-test the packaged executable's --version command.
+- Run model unit tests against local generated fixtures when present. Live registry/model downloads and benchmarks remain outside default CI.
+- Keep Windows basename handling consistent in the cross-platform unit suite.
+
 ### Choose which GPU runs inference
 Settings → Inference Backend → GPU picks the GPU, and every backend uses it. Until now each backend took its API's first GPU, and those differ: DirectML and NCNN often landed on a laptop's integrated GPU while TensorRT used the NVIDIA one.
 - TensorRT, MIGraphX and PyTorch-based filters see only the chosen GPU, so engine and program builds happen on it too
