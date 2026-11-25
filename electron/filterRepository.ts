@@ -5,7 +5,7 @@ import * as os from 'os';
 import { createHash } from 'crypto';
 import { execFile } from 'child_process';
 import { z } from 'zod';
-import { pkg, safePath, chooseArtifact, packageBlockReason, allowedRepositoryUrl, type Package } from './filterRepositoryPolicy';
+import { safePath, chooseArtifact, checkedArtifact, findPackage, indexRepository, planInstall, RepositoryBlock, type Package, type RepositoryIndex } from './filterRepositoryPolicy';
 import type { RepositoryEntry } from './filterRepositoryTypes';
 import { PATHS } from './constants';
 import { downloadToFile } from './download';
@@ -13,7 +13,7 @@ import { setupVSEnvironment } from './utils';
 import { TemplateManager } from './templateManager';
 
 const REGISTRY = 'https://www.vapoursynth.com/vsrepo/vspackages3.zip';
-let packages: Package[] = [];
+let index: RepositoryIndex = { packages: [], unreadable: new Set() };
 let installed = new Set<string>();
 let installing = false;
 
@@ -29,24 +29,10 @@ async function fileDigest(file: string): Promise<string> {
   for await (const block of fs.createReadStream(file)) hash.update(block);
   return hash.digest('hex');
 }
-function findPackage(id: string): Package | undefined {
-  return packages.find(p => p.identifier === id) ?? packages.find(p => p.namespace === id || p.modulename === id);
-}
-function checkedArtifact(p: Package) {
-  const blocked = packageBlockReason(p);
-  if (blocked) throw new Error(p.name + ': ' + blocked);
-  const chosen = chooseArtifact(p);
-  if (!chosen) throw new Error(p.name + ': no compatible binary/API declaration for this runtime.');
-  if (!allowedRepositoryUrl(chosen.asset.url)) throw new Error(p.name + ': unsupported repository download host: ' + new URL(chosen.asset.url).hostname);
-  const entries = Object.entries(chosen.asset.files);
-  if (!entries.length || entries.length > 512) throw new Error('Invalid package file count.');
-  for (const [target, [member]] of entries) { safePath.parse(target); safePath.parse(member); }
-  return chosen;
-}
 function packageBase(p: Package): string { return p.type === 'PyScript' ? PATHS.SCRIPTS : PATHS.PLUGINS; }
 async function refreshInstalled(): Promise<void> {
   installed = new Set<string>(JSON.parse(await run("import json,vapoursynth as vs\nprint(json.dumps([p.identifier for p in vs.core.plugins()]))")));
-  for (const p of packages) {
+  for (const p of index.packages) {
     const chosen = chooseArtifact(p);
     if (chosen && Object.keys(chosen.asset.files).length) {
       const matches = await Promise.all(Object.entries(chosen.asset.files).map(async ([target, [, sha]]) => {
@@ -56,39 +42,19 @@ async function refreshInstalled(): Promise<void> {
       }));
       if (matches.every(Boolean)) installed.add(p.identifier);
     }
-    // Scripts already supplied by pip/the bundled runtime need not be downloaded.
-    if (p.type === 'PyScript' && p.modulename && /^\w+$/.test(p.modulename)) {
+    // Scripts and wheels already supplied by pip/the bundled runtime need not be downloaded.
+    if ((p.type === 'PyScript' || p.type === 'PyWheel') && p.modulename && /^\w+$/.test(p.modulename)) {
       for (const base of chosen ? [PATHS.SITE_PACKAGES] : [PATHS.SCRIPTS, PATHS.SITE_PACKAGES]) {
         if (await fs.pathExists(path.join(base, p.modulename + '.py')) || await fs.pathExists(path.join(base, p.modulename, '__init__.py'))) installed.add(p.identifier);
       }
     }
   }
 }
-function plan(root: Package): Package[] {
-  const result: Package[] = []; const visiting = new Set<string>(); const done = new Set<string>();
-  const visit = (p: Package) => {
-    // A pinned package already available in the runtime may satisfy a dependency,
-    // but the browser never installs or replaces that package itself.
-    if (p !== root && packageBlockReason(p) && installed.has(p.identifier)) return;
-    checkedArtifact(p);
-    if (done.has(p.identifier) || installed.has(p.identifier)) return;
-    if (visiting.has(p.identifier)) throw new Error('The registry contains a dependency cycle.');
-    visiting.add(p.identifier);
-    for (const dependency of p.dependencies) {
-      const child = findPackage(dependency);
-      if (!child) {
-        if (installed.has(dependency)) continue;
-        throw new Error(p.name + ': dependency is not in VSRepo: ' + dependency);
-      }
-      visit(child);
-    }
-    visiting.delete(p.identifier); done.add(p.identifier); result.push(p);
-  };
-  visit(root); return result;
-}
+function plan(root: Package): Package[] { return planInstall(root, index, installed); }
+function errorText(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 export async function listRepository(refresh: boolean): Promise<RepositoryEntry[]> {
   const cache = path.join(PATHS.CONFIG, 'vsrepo-packages.json');
-  if (refresh || !packages.length) {
+  if (refresh || !index.packages.length) {
     let data: unknown;
     if (!refresh) data = await fs.readJson(cache).catch(() => null);
     if (!data) {
@@ -102,24 +68,25 @@ export async function listRepository(refresh: boolean): Promise<RepositoryEntry[
       } finally { await fs.remove(stage); }
     }
     const parsed = z.object({ 'file-format': z.literal(3), packages: z.array(z.unknown()).max(2000) }).parse(data);
-    packages = parsed.packages.map(p => pkg.safeParse(p)).filter(p => p.success).map(p => p.data!);
+    index = indexRepository(parsed.packages);
     await fs.ensureDir(PATHS.CONFIG); await fs.writeJson(cache, data);
   }
   await refreshInstalled();
-  return packages.map(p => {
-    const chosen = chooseArtifact(p); let reason = '';
-    try { plan(p); } catch (error) { reason = String(error); }
+  return index.packages.map((p): RepositoryEntry => {
+    const chosen = chooseArtifact(p); let reason = ''; let blocker: RepositoryEntry['blocker'];
+    try { plan(p); } catch (error) { reason = errorText(error); blocker = error instanceof RepositoryBlock ? error.blocker : 'other'; }
     return { id: p.identifier, name: p.name, description: p.description, kind: p.type,
-      version: chosen?.version ?? '', api: chosen?.api ?? p.api ?? null, namespace: p.namespace ?? p.modulename ?? '',
-      compatible: Boolean(chosen) && !reason, reason: reason || (chosen ? '' : 'No supported API3/API4 artifact for this platform, or script metadata is incomplete.'),
+      version: chosen?.version ?? p.releases[0]?.version ?? '', api: chosen?.api ?? p.api ?? null, namespace: p.namespace ?? p.modulename ?? '',
+      compatible: !reason, reason, blocker, category: p.category,
+      updated: chosen?.published ?? p.releases[0]?.published,
       downloadBytes: chosen?.asset.size,
-      website: [p.github, p.website].find(value => value && /^https?:\/\//.test(value)),
+      website: p.github ?? p.website,
       installed: installed.has(p.identifier) };
   });
 }
 export async function installRepositoryPackage(id: string): Promise<{ message: string }> {
   if (installing) throw new Error('A filter installation is already running.');
-  const root = findPackage(id);
+  const root = findPackage(index.packages, id);
   if (!root) throw new Error('Load the VSRepo catalog before installing.');
   installing = true;
   let stage = '';

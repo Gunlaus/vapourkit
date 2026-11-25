@@ -11,7 +11,8 @@ const HOVER_ACTION = 'opacity-0 group-hover:opacity-100 focus-visible:opacity-10
 export interface PickerOption {
   key: string;
   label: string;
-  count: number;
+  /** Left out for choices that are not filters, such as a sort order. */
+  count?: number;
 }
 
 /** One labelled group of sidebar filters; the selected one is marked. */
@@ -39,13 +40,15 @@ export function PickerSidebarSection({ label, options, selected, onSelect, class
             }`}
           >
             <span className="truncate">{option.label}</span>
-            <span className={`text-[10.5px] tabular-nums ${
-              selected === option.key
-                ? 'text-accent-400'
-                : 'text-ink-500 group-hover:text-ink-400'
-            }`}>
-              {option.count}
-            </span>
+            {option.count !== undefined && (
+              <span className={`text-[10.5px] tabular-nums ${
+                selected === option.key
+                  ? 'text-accent-400'
+                  : 'text-ink-500 group-hover:text-ink-400'
+              }`}>
+                {option.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -63,9 +66,12 @@ interface PickerRowProps {
   /** Names the item in the edit and delete buttons: "template", "model". */
   noun: string;
   isSelected: boolean;
-  isFavorite: boolean;
+  isFavorite?: boolean;
   onSelect: () => void;
-  onToggleFavorite: () => void;
+  /** Shows the favorite button. */
+  onToggleFavorite?: () => void;
+  /** Controls at the row's end, such as an install button. */
+  actions?: ReactNode;
   onEdit?: () => void;
   onDelete?: () => void;
 }
@@ -83,6 +89,7 @@ export function PickerRow({
   onToggleFavorite,
   onEdit,
   onDelete,
+  actions,
 }: PickerRowProps) {
   return (
     <div
@@ -140,7 +147,8 @@ export function PickerRow({
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         )}
-        <button
+        {actions}
+        {onToggleFavorite && <button
           onClick={(e) => {
             e.stopPropagation();
             onToggleFavorite();
@@ -154,7 +162,7 @@ export function PickerRow({
           aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
         >
           <Star className={`w-3.5 h-3.5 ${isFavorite ? 'fill-warn-400' : ''}`} />
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -193,6 +201,10 @@ interface PickerModalProps<T> {
   icon: LucideIcon;
   closeLabel: string;
   onClose: () => void;
+  /** Disables the close button; Escape and the backdrop still call onClose. */
+  closeDisabled?: boolean;
+  /** ModalShell's stacking layer; 60 for a picker opened over another. */
+  layer?: 50 | 60;
   headerActions?: ReactNode;
   searchQuery: string;
   onSearchChange: (query: string) => void;
@@ -216,7 +228,8 @@ interface PickerModalProps<T> {
   renderItem: (item: T) => ReactNode;
   /** The list's noun in the footer: "filters", "models". */
   noun: string;
-  favoriteCount: number;
+  /** Shown in the footer; left out for lists without favorites. */
+  favoriteCount?: number;
   /** Footer content after the counts. */
   footerExtra?: ReactNode;
 }
@@ -230,6 +243,8 @@ export function PickerModal<T>({
   icon: Icon,
   closeLabel,
   onClose,
+  closeDisabled,
+  layer,
   headerActions,
   searchQuery,
   onSearchChange,
@@ -262,6 +277,8 @@ export function PickerModal<T>({
       icon={Icon}
       onClose={onClose}
       closeLabel={closeLabel}
+      closeDisabled={closeDisabled}
+      layer={layer}
       closeTitle="Close"
       closeOnBackdrop
       padded={false}
@@ -359,8 +376,12 @@ export function PickerModal<T>({
       <div className="flex-shrink-0 h-8 border-t border-ink-800 px-3 bg-ink-900 flex items-center justify-between text-[11px] text-ink-500">
         <div className="flex items-center gap-3 tabular-nums">
           <span>{items.length} {noun} shown</span>
-          <span>•</span>
-          <span>{favoriteCount} favorites</span>
+          {favoriteCount !== undefined && (
+            <>
+              <span>•</span>
+              <span>{favoriteCount} favorites</span>
+            </>
+          )}
           {footerExtra}
         </div>
         <div className="flex items-center gap-2">

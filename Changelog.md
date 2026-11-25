@@ -5,6 +5,7 @@
 ### Browse more VapourSynth filters
 - The VS filter picker can browse VSRepo, show API/platform compatibility and source links, and install compatible plugins or scripts with their dependencies.
 - Downloads are hash-checked and tested in a temporary Python process before publication. Existing files are preserved, verified dependencies are reused, and app-managed inference packages and BestSource stay under Vapourkit's installer.
+- The browser uses the picker layout: filter by status, type and category, sort by name, release date, installed or compatible first, and see why a package can't be installed. Packages with loose registry metadata (such as the NNEDI3 weights) are no longer dropped, so their dependents install.
 
 ### Guided encoding and container tracks
 - Simple encoding exposes bitrate/quality, keyframes, audio and codec-specific settings; Advanced starts from the current Simple controls.

@@ -68,6 +68,19 @@ describe('staged VSRepo installation', () => {
     await expect(service.installRepositoryPackage('test.newblur')).rejects.toThrow('dependency is not in VSRepo');
     expect(mocks.download.mock.calls.length).toBe(before);
   });
+  it('lists dependencies with an empty website and PyWheel packages instead of dropping them', async () => {
+    const weights = { ...entry, name: 'Weights', identifier: 'test.weights', namespace: 'weights', website: '' };
+    const wheel = { name: 'vs-util', identifier: 'vsutil', type: 'PyWheel', modulename: 'vsutil', releases: [{ version: '1', published: '2025-01-01T00:00:00Z', wheel: {} }] };
+    registry = { 'file-format': 3, packages: [{ ...entry, category: 'Denoising', releases: [{ ...entry.releases[0], published: '2024-05-06T00:00:00Z' }], dependencies: ['test.weights'] }, weights, { ...entry, name: 'Needs wheel', identifier: 'test.needswheel', dependencies: ['vsutil'] }, wheel] };
+    const service = await import('./filterRepository'); const rows = await service.listRepository(true);
+    const byId = Object.fromEntries(rows.map(row => [row.id, row]));
+    expect(byId['test.newblur']).toMatchObject({ compatible: true, reason: '', category: 'Denoising', updated: '2024-05-06T00:00:00Z' });
+    expect(byId['test.weights'].website).toBeUndefined();
+    expect(byId.vsutil).toMatchObject({ compatible: false, blocker: 'type', kind: 'PyWheel', version: '1' });
+    expect(byId['test.needswheel']).toMatchObject({ compatible: false, blocker: 'dependency' });
+    expect(byId['test.needswheel'].reason).toContain('is in VSRepo but cannot be installed here');
+    expect(byId['test.needswheel'].reason).not.toMatch(/^Error:/);
+  });
   it('installs direct Python script assets with the same checksum and load checks', async () => {
     const script = { name:'New script', identifier:'newscript', type:'PyScript', modulename:'newscript', releases:[{version:'1',script:{url:'https://raw.githubusercontent.com/test/repo/commit/newscript.py',files:{'newscript.py':['newscript.py',sha]}}}] };
     registry = { 'file-format':3, packages:[script] };
