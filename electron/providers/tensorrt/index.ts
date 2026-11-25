@@ -18,13 +18,13 @@ export const tensorrtProvider: InferenceProvider = {
     return modelPath;
   },
 
-  // Prepare for the actual stage dimensions and cast using validated engine I/O.
+  // The engine is built once in the build dialog. The loader checks the stage
+  // size against the engine's shape profile, pads to the model's spatial
+  // multiple and casts to the engine's I/O type from its build manifest.
   modelCallCode(inputExpr: string, modelFile: string, opts: ModelCallOptions): string {
-    const literal = (value: string) => JSON.stringify(value.replace(/\\/g, '/'));
     return [
       'import vk_model_runtime as _vk_models',
-      `clip = _vk_models.load_model(${inputExpr}, ${literal(modelFile)}, streams=${opts.numStreams},`,
-      `    builder=${literal(PATHS.APP_DATA + '/build_trt_engine.py')}, python=${literal(PATHS.PYTHON)}, precision="${opts.useFp32 ? 'fp32' : opts.useBf16 ? 'bf16' : 'fp16'}")`,
+      `clip = _vk_models.load_model(${inputExpr}, ${JSON.stringify(modelFile.replace(/\\/g, '/'))}, streams=${opts.numStreams})`,
       '',
     ].join('\n');
   },

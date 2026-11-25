@@ -85,7 +85,7 @@ export async function installCatalogModel(id: string, version: string, experimen
     const ledger = await readLedger();
     ledger.models = { ...ledger.models, [entry.id + '@' + entry.version]: { version: entry.version, appVersion: app.getVersion(), installedAt: new Date().toISOString(), author: entry.author, source: entry.source, license: entry.license, licenseUrl: entry.licenseUrl, files } };
     await writeLedger(ledger);
-    return { message: 'Model installed alongside existing versions. It is now available in the model picker.' };
+    return { message: 'Model installed alongside existing versions. It is now in the model picker. With TensorRT, build its engine once from the build notification before first use.' };
   } catch (error) {
     if (createdMetadata) await configManager.deleteModelMetadata(createdMetadata).catch(() => {});
     if (createdPackage) await fs.remove(createdPackage).catch(() => {});

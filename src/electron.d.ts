@@ -607,7 +607,6 @@ export interface ModelInitProgress {
 }
 
 export interface ImportModelParams {
-  deferBuild?: boolean;
   onnxPath: string;
   modelName: string;
   minShapes: string;

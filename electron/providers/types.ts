@@ -12,7 +12,6 @@ export interface ModelCallOptions {
   numStreams: number;
   /** True when the model was imported as FP32 (otherwise FP16). */
   useFp32: boolean;
-  useBf16?: boolean;
 }
 
 export interface EngineBuildParams {

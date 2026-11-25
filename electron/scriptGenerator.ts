@@ -1,4 +1,3 @@
-import { modelMetadataKey } from './modelIdentity';
 // electron/scriptGenerator.ts
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -609,8 +608,7 @@ export class VapourSynthScriptGenerator {
     code += `${CLIP} = core.std.Expr(${CLIP}, expr=['x 0 max 1 min'])\n`;
 
     // Determine num_streams value (default to 2 if not specified)
-    const metadataKey = modelMetadataKey(modelFile, PATHS.MODELS);
-    const callOptions = { numStreams: numStreams ?? 2, useFp32, useBf16: configManager.getModelMetadata?.(metadataKey)?.useBf16 ?? false };
+    const callOptions = { numStreams: numStreams ?? 2, useFp32 };
 
     // Generate model inference code based on model type
     if (modelType === 'vsr') {

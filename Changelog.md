@@ -32,8 +32,10 @@
 - The catalog installs models only. It does not fetch a remote catalog or replace FFmpeg, Python runtimes, filters or pinned dependencies.
 
 ### Model preparation
-- Import complete ONNX packages, resolve symbolic RGB layouts, and prepare TensorRT engines for the dimensions entering each model.
-- Validate managed RGB candidates before publishing, preserve working engines on failure, and reuse compatible engines under a cross-process build lock.
+- TensorRT engines stay dynamic by default: build a model once with a shape range, and that one engine serves every resolution inside it. Processing waits until each TensorRT model is built, and a resolution outside the range names the range and asks for a rebuild. Static single-resolution engines remain an explicit choice in the build dialog.
+- Import complete ONNX packages (external weights included) and resolve symbolic RGB layouts. Catalog models go through the same build step.
+- Validate each newly built engine through real inference before it replaces the working one, keep the old engine on failure, and serialize builds of one engine across processes.
+- Cast to the engine's own input type from its build manifest, and pad to a model's spatial multiple, cropping the result.
 - Identify CUDA's selected visible GPU without requiring an active context. Keep same-named model packages' metadata separate.
 - Compare against a pinned CPU ONNX Runtime in a separate process with a 60-second timeout, bounded input/output data, and limited CPU threads. Reference failures are explicit; generic vs-mlrt RIFE/DPIR builds retain their existing path.
 

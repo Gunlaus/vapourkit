@@ -1,5 +1,5 @@
-import type { BackendId, ModelFile } from '../electron.d';
-import { getBackendDescriptor } from './backends';
+import type { BackendId, FilterBackend, ModelFile } from '../electron.d';
+import { getBackendDescriptor, resolveFilterBackend } from './backends';
 
 // NOTE: ModelFile.backend describes the model FILE kind ('tensorrt' = built
 // .engine file, 'onnx' = portable .onnx file), not the inference backend the
@@ -80,6 +80,24 @@ export function modelNeedsBuild(
   }
 
   return model.backend === 'onnx' && !model.hasEngine;
+}
+
+/**
+ * True when an enabled model filter runs on an engine-building backend but
+ * still points at a raw ONNX. The engine has to be built (once, normally with
+ * a dynamic shape range) before processing.
+ */
+export function hasUnbuiltEngineModel(
+  filters: ReadonlyArray<{ enabled: boolean; filterType: string; modelPath?: string; backend?: FilterBackend }>,
+  defaultBackend: BackendId
+): boolean {
+  return filters.some(f =>
+    f.enabled &&
+    f.filterType === 'aiModel' &&
+    !!f.modelPath &&
+    f.modelPath.toLowerCase().endsWith('.onnx') &&
+    getBackendDescriptor(resolveFilterBackend(f.backend, defaultBackend)).requiresEngineBuild
+  );
 }
 
 /**

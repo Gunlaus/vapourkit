@@ -19,7 +19,6 @@ export interface ImportForm {
   useCustomTrtexecParams: boolean;
   customTrtexecParams: string;
   skipValidation: boolean;
-  prepareOnUse?: boolean;
   detectionFailed: boolean;
 }
 
@@ -64,7 +63,6 @@ const DEFAULT_IMPORT_FORM: ImportForm = {
   useCustomTrtexecParams: true, // Always true in refactored UI - the textbox is the main interface
   customTrtexecParams: generateTrtexecCommand('image', false, false, 'input', false),
   skipValidation: false,
-  prepareOnUse: true,
   detectionFailed: false
 };
 
@@ -127,7 +125,7 @@ export const useModelImport = (
             detectionFailed = true;
           }
           if (validation.compatibilityError) { notify.error('Unsupported model layout', validation.compatibilityError); return; }
-      if (validation.isValid && validation.inputName) {
+          if (validation.isValid && validation.inputName) {
             extractedInputName = validation.inputName;
             addConsoleLog(`[Model] Detected input name: ${extractedInputName}`);
           }
@@ -349,7 +347,6 @@ export const useModelImport = (
           useCustomTrtexecParams: importForm.useCustomTrtexecParams,
           customTrtexecParams: importForm.customTrtexecParams || undefined,
           skipValidation: importForm.skipValidation,
-          deferBuild: importForm.prepareOnUse !== false,
         });
       }
     } catch (error) {

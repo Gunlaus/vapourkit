@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 vi.mock('./logger', () => ({ logger: { model: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 import { inspectOnnxGraph } from './onnxGraphInspector';
-import { importModelPackage, modelPackageFiles, listModelFiles } from './modelPackage';
+import { hasBuiltEngine, importModelPackage, modelPackageFiles, listModelFiles } from './modelPackage';
 const varint = (n: number): Buffer => { const b: number[] = []; do { b.push((n & 127) | (n > 127 ? 128 : 0)); n = Math.floor(n / 128); } while (n); return Buffer.from(b); };
 const field = (n: number, b: Buffer) => Buffer.concat([varint(n * 8 + 2), varint(b.length), b]);
 const str = (n: number, s: string) => field(n, Buffer.from(s));
@@ -44,5 +44,14 @@ describe('complete ONNX packages', () => {
     await expect(modelPackageFiles(path.join(dir, 'model.onnx'))).rejects.toThrow('inside');
     await fs.writeFile(path.join(dir, 'model.onnx'), fixture('missing.bin'));
     await expect(modelPackageFiles(path.join(dir, 'model.onnx'))).rejects.toThrow('Missing external weights');
+  });
+});
+describe('built engine pairing', () => {
+  it('pairs an ONNX with an engine of the same stem or with a precision suffix', () => {
+    expect(hasBuiltEngine('m_fp16.onnx', ['m_fp16.engine'])).toBe(true);
+    expect(hasBuiltEngine('packages\\cat-1-abc\\cat-1.onnx', ['packages/cat-1-abc/cat-1_fp16.engine'])).toBe(true);
+    expect(hasBuiltEngine('packages/cat-1-abc/cat-1.onnx', ['packages/cat-1-abc/cat-1_bf16.engine'])).toBe(true);
+    expect(hasBuiltEngine('packages/cat-1-abc/cat-1.onnx', ['cat-1_fp16.engine', 'packages/other/cat-1_fp16.engine'])).toBe(false);
+    expect(hasBuiltEngine('m.onnx', [])).toBe(false);
   });
 });

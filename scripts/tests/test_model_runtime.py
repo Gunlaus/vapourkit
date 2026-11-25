@@ -30,7 +30,6 @@ class ModelRuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        runtime._CHECKED.clear(); runtime._CONTRACTS.clear()
     def tearDown(self): self.temp.cleanup()
     def test_real_graph_and_external_weights_are_fingerprinted(self):
         source = self.root / 'model.onnx'; model(source, external=True)
@@ -70,16 +69,6 @@ class ModelRuntimeTests(unittest.TestCase):
             engine.write_bytes(b'new engine contents')
             self.assertNotEqual(runtime.cached_digest(engine), first)
             self.assertEqual(hash_file.call_count, 2)
-
-    def test_contract_cache_survives_new_process_and_invalidates_external_weights(self):
-        source = self.root / 'model.onnx'; model(source, external=True)
-        original = runtime.cached_contract(source)
-        runtime._CONTRACTS.clear()
-        with patch.object(runtime, 'graph_contract', side_effect=AssertionError('Must reuse warm contract')):
-            self.assertEqual(runtime.cached_contract(source), original)
-        runtime._CONTRACTS.clear()
-        weights = self.root / 'weights.bin'; weights.write_bytes(weights.read_bytes() + b'changed')
-        self.assertNotEqual(runtime.cached_contract(source)['files'], original['files'])
 
     def test_even_windows_and_five_dimensional_tensors_are_not_guessed(self):
         for channels, rank in [(6, 4), (3, 5), (1, 4)]:
@@ -224,62 +213,98 @@ class ModelRuntimeTests(unittest.TestCase):
         self.assertTrue(all(w.num_frames == 2 for w in short))
         self.assertEqual([w.values[-1] for w in short], [1, 1, 1, 1, 2, 2, 2, 2, 2])
 
-    def test_first_use_builds_for_actual_stage_and_rebuilds_after_weights_change(self):
-        source = self.root / 'model.onnx'; model(source, external=True)
-        clip = types.SimpleNamespace(width=1920, height=1088)
-        output = types.SimpleNamespace(width=1920, height=1088)
+    def engine(self, name='model_fp16.engine', profile=((64, 64), (720, 1280), (1080, 1920)), channels=3, dtype='DataType.HALF', source=None):
+        """A built engine with the manifest the builder writes; profile shapes are (height, width)."""
+        engine = self.root / name; engine.parent.mkdir(parents=True, exist_ok=True); engine.write_bytes(b'engine ' + name.encode())
+        if profile is None: return engine
+        binding = {'name': 'pixels', 'dtype': dtype, 'shape': [1, channels, -1, -1],
+                   'profiles': [[[1, channels, h, w] for h, w in profile]]}
+        manifest = {'schema': 1, 'bindings': {'inputs': [binding], 'outputs': [{'name': 'output', 'dtype': dtype, 'shape': [1, 3, -1, -1]}]},
+                    'engineSha256': runtime.digest(engine), 'precision': 'fp16'}
+        if source: manifest['sourceRelative'] = source
+        Path(str(engine) + '.json').write_text(json.dumps(manifest))
+        return engine
+
+    def test_dynamic_engine_serves_every_size_in_its_profile_without_building(self):
+        engine = self.engine()
+        with patch.object(runtime.subprocess, 'run', side_effect=AssertionError('Scripts must never build engines')), patch.object(runtime, 'raw_model', side_effect=lambda clips, *a: clips[0]) as run:
+            for width, height in ((640, 480), (1280, 720), (1920, 1080), (64, 64)):
+                runtime.load_model(types.SimpleNamespace(width=width, height=height), str(engine), 2)
+                self.assertEqual(run.call_args.args[1], engine)
+                self.assertEqual(run.call_args.args[3]['inputs'][0]['dtype'], 'DataType.HALF')
+        self.assertEqual([p.name for p in self.root.iterdir() if p.is_dir()], [], 'No per-resolution engine cache')
+
+    def test_size_outside_the_profile_names_the_range_and_rebuild_remedy(self):
+        engine = self.engine()
+        with patch.object(runtime, 'raw_model', side_effect=AssertionError('Must not run')):
+            with self.assertRaisesRegex(RuntimeError, r'accepts 64x64 to 1920x1080 .* sends 3840x2160.*Rebuild the engine'):
+                runtime.load_model(types.SimpleNamespace(width=3840, height=2160), engine, 2)
+
+    def test_engine_without_manifest_retries_the_other_float_format(self):
+        engine = self.engine('legacy_fp16.engine', profile=None)
+        class Error(Exception): pass
         calls = []
-        def build(args, **kwargs):
-            calls.append(args)
-            target = Path(next(a.split('=', 1)[1] for a in args if a.startswith('--saveEngine=')))
-            shape = [1, 3, clip.height, clip.width]
-            target.write_bytes(b'validated engine')
-            metadata = {'schema': 1, 'validation': {'accuracy': {'status': 'passed'}}, 'runtime': {'gpu': 'test'}, 'precision': 'fp16' if '--fp16' in args else 'fp32', 'contract': runtime.graph_contract(source),
-                        'engineSha256': runtime.digest(target), 'bindings': {'inputs': [{'shape': shape}], 'outputs': []}}
-            Path(str(target) + '.json').write_text(json.dumps(metadata))
-        with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test'}), patch.object(runtime.subprocess, 'run', build), patch.object(runtime, 'raw_model', return_value=output), patch.object(runtime, 'validate_output', side_effect=AssertionError('Workflow construction must remain lazy')):
-            runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
-            self.assertIn('--shapes=pixels:1x3x1088x1920', calls[0])
-            edge = types.SimpleNamespace(width=1920, height=1088)
-            runtime.load_model([edge, edge, clip, edge, edge], source, 2, 'builder.py', sys.executable)
-            self.assertEqual(runtime.raw_model.call_args.args[0], [clip])
-            self.assertEqual(len(calls), 1)
-            weights = self.root / 'weights.bin'; weights.write_bytes(weights.read_bytes() + b'new checkpoint')
-            runtime.load_model(clip, source, 2, 'builder.py', sys.executable)
-            self.assertEqual(len(calls), 2)
-            runtime.load_model(clip, source, 2, 'builder.py', sys.executable, precision='fp32')
-            self.assertEqual(len(calls), 3, 'A warm in-process FP16 entry must not mask a precision change')
-            self.assertNotIn('--fp16', calls[-1])
+        def trt_model(clips, engine_path, num_streams):
+            calls.append(clips)
+            if len(calls) == 1: raise Error('trt: bits per sample mismatch')
+            return 'output'
+        fake = types.SimpleNamespace(Error=Error, RGBS=32, RGBH=16, core=types.SimpleNamespace(
+            trt=types.SimpleNamespace(Model=trt_model), resize=types.SimpleNamespace(Point=lambda clip, format: ('cast', format))))
+        clip = types.SimpleNamespace(width=1280, height=720, format=types.SimpleNamespace(bits_per_sample=16))
+        with patch.dict(sys.modules, {'vapoursynth': fake}):
+            self.assertEqual(runtime.load_model(clip, engine, 2), 'output')
+        self.assertEqual(calls, [[clip], [('cast', 32)]])
 
-    def test_fresh_interpreter_state_reuses_legacy_profile_despite_helper_edit(self):
+    def test_stale_manifest_is_ignored(self):
+        engine = self.engine()
+        engine.write_bytes(b'replaced by hand')
+        with patch.object(runtime, 'probed_model', return_value='probed') as probe, patch.object(runtime, 'raw_model', side_effect=AssertionError('Stale manifest')):
+            self.assertEqual(runtime.load_model(types.SimpleNamespace(width=8000, height=8000), engine, 2), 'probed')
+        probe.assert_called_once()
+
+    def test_missing_engine_or_onnx_path_asks_for_a_build(self):
         source = self.root / 'model.onnx'; model(source)
-        cache = self.root / 'engines'; cache.mkdir()
-        engine = cache / 'model-legacy-key.engine'; engine.write_bytes(b'validated')
-        contract = runtime.graph_contract(source)
-        metadata = {'schema': 1, 'validation': {'accuracy': {'status': 'passed'}}, 'runtime': {'gpu': 'test', 'helper': 'old logging code'}, 'precision': 'fp16',
-                    'contract': contract, 'engineSha256': runtime.digest(engine),
-                    'bindings': {'inputs': [{'shape': [1,3,-1,-1], 'profiles': [[[1,3,64,64],[1,3,128,128],[1,3,256,256]]]}]}}
-        Path(str(engine)+'.json').write_text(json.dumps(metadata))
-        with patch.object(runtime, 'runtime_identity', return_value={'gpu': 'test', 'helper': 'new logging code'}), patch.object(runtime, 'run_engine_builder') as build, patch.object(runtime, 'raw_model', side_effect=lambda clips,*a: clips[0]):
-            for size in (128, 192, 128):
-                runtime._CHECKED.clear(); runtime._CONTRACTS.clear()
-                runtime.load_model(types.SimpleNamespace(width=size,height=size), source, 2, 'builder.py', sys.executable)
-                self.assertEqual(runtime.raw_model.call_args.args[1], engine)
-            build.assert_not_called()
-        for changed in ({'gpu':'other'}, {'gpu':'test','engineAbi':2}, {'gpu':'test','tensorrt':'new'}):
-            self.assertIn('runtime compatibility changed', runtime.engine_rejection(metadata,contract,changed,[1,3,128,128],'fp16',engine))
-        self.assertIn('precision',runtime.engine_rejection(metadata,contract,{'gpu':'test'},[1,3,128,128],'fp32',engine))
-        self.assertIn('profile',runtime.engine_rejection(metadata,contract,{'gpu':'test'},[1,3,512,512],'fp16',engine))
-        engine.write_bytes(b'corrupt')
-        self.assertIn('integrity',runtime.engine_rejection(metadata,contract,{'gpu':'test'},[1,3,128,128],'fp16',engine))
+        for target in (source, self.root / 'missing_fp16.engine'):
+            with self.subTest(target=target.name), self.assertRaisesRegex(RuntimeError, 'Build the model'):
+                runtime.load_model(types.SimpleNamespace(width=64, height=64), target, 2)
 
-    def test_plugin_location_is_diagnostic_but_plugin_bytes_remain_checked(self):
-        plugin = self.root/'plugin.dll'; plugin.write_bytes(b'plugin one')
-        copied = self.root/'copy.dll'; copied.write_bytes(plugin.read_bytes())
-        before = runtime.compatibility_identity({'plugin':{'version':'1','path':str(plugin)}})
-        self.assertEqual(before,runtime.compatibility_identity({'plugin':{'version':'1','path':str(copied)}}))
-        copied.write_bytes(b'plugin two')
-        self.assertNotEqual(before,runtime.compatibility_identity({'plugin':{'version':'1','path':str(copied)}}))
+    def test_spatial_multiple_pads_inside_the_profile_and_crops_the_output(self):
+        package = self.root / 'packages' / 'cat-1-abc'; package.mkdir(parents=True)
+        source = package / 'cat-1.onnx'; model(source)
+        Path(str(source) + '.contract.json').write_text(json.dumps({'spatialMultiple': 2, 'scale': 2}))
+        engine = self.engine('packages/cat-1-abc/cat-1_fp16.engine', source='cat-1.onnx')
+        Clip = types.SimpleNamespace
+        fake = types.SimpleNamespace(core=types.SimpleNamespace(std=types.SimpleNamespace(
+            AddBorders=lambda c, right, bottom: Clip(width=c.width + right, height=c.height + bottom),
+            CropRel=lambda c, right, bottom: Clip(width=c.width - right, height=c.height - bottom))))
+        def run(clips, engine_path, streams, details):
+            self.assertEqual((clips[0].width, clips[0].height), (722, 480))
+            return Clip(width=clips[0].width * 2, height=clips[0].height * 2)
+        with patch.dict(sys.modules, {'vapoursynth': fake}), patch.object(runtime, 'raw_model', side_effect=run):
+            output = runtime.load_model(Clip(width=721, height=480), engine, 2)
+        self.assertEqual((output.width, output.height), (1442, 960))
+
+    def test_temporal_window_follows_the_engine_channel_count(self):
+        engine = self.engine('vsr_fp16.engine', channels=15)
+        centre = types.SimpleNamespace(width=640, height=480)
+        with patch.object(runtime, 'temporal_window', return_value=[centre] * 5) as window, patch.object(runtime, 'raw_model', side_effect=lambda clips, *a: clips):
+            self.assertEqual(len(runtime.load_model([centre] * 3, engine, 2)), 5)
+        window.assert_called_once_with(centre, 5)
+
+    def test_rgb_builds_take_the_engine_build_lock(self):
+        from contextlib import contextmanager
+        source = self.root / 'model.onnx'; model(source)
+        target = self.root / 'model_fp16.engine'
+        held = []
+        @contextmanager
+        def lock(engine):
+            held.append(str(engine)); yield
+        def fake_build(opts): Path(opts['save_engine']).write_bytes(b'checked engine'); return 0
+        args = ['--vkAdapter=rgb-window-v1', '--onnx=' + str(source), '--saveEngine=' + str(target),
+                '--minShapes=pixels:1x3x64x64', '--optShapes=pixels:1x3x720x1280', '--maxShapes=pixels:1x3x1080x1920', '--fp16']
+        with patch.dict(sys.modules, {'tensorrt': types.SimpleNamespace()}), patch.object(runtime, 'engine_build_lock', lock), patch.object(builder, 'build', fake_build), patch.object(runtime, 'validate_engine', return_value={'schema': 1, 'validation': {}}):
+            self.assertEqual(builder.main(args), 0)
+        self.assertEqual(held, [str(target)])
 
     def test_saved_engine_is_only_published_after_validation(self):
         source = self.root / 'model.onnx'; model(source)

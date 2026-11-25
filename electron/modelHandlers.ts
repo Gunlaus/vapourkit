@@ -1,5 +1,5 @@
 import { modelMetadataKey } from './modelIdentity';
-import { importModelPackage, listModelFiles } from './modelPackage';
+import { hasBuiltEngine, importModelPackage, listModelFiles } from './modelPackage';
 import { describeModel } from './modelContract';
 import { inspectResolvedOnnxGraph } from './modelGraphResolver';
 import { ipcMain, BrowserWindow } from 'electron';
@@ -162,10 +162,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
       
       // Find ONNX models without corresponding engine files
       const uninitializedModels = onnxFiles
-        .filter(onnxFile => {
-          const engineFile = onnxFile.replace('.onnx', '.engine');
-          return !engineFiles.includes(engineFile);
-        })
+        .filter(onnxFile => !hasBuiltEngine(onnxFile, engineFiles))
         .map(file => {
           const modelName = path.basename(file, '.onnx');
           const metadata = configManager.getModelMetadata(modelMetadataKey(file, PATHS.MODELS));
@@ -317,7 +314,6 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
     useCustomTrtexecParams?: boolean;
     customTrtexecParams?: string;
     skipValidation?: boolean;
-    deferBuild?: boolean;
   }) => {
     return await withLogSeparator(async () => {
       const provider = resolveProvider(params.backend);
@@ -396,10 +392,6 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           params.modelType === 'vsr' ? params.temporalFrames : undefined
         );
 
-        if (params.deferBuild && provider.descriptor.requiresEngineBuild) {
-          sendModelImportProgress(mainWindow, 'complete', 100, 'Model imported. TensorRT will build and validate it for the actual workflow dimensions on first use.', targetOnnxPath);
-          return { success: true, onnxPath: targetOnnxPath };
-        }
         // Backends that run ONNX directly (DirectML, and later NCNN/OpenVINO)
         // are done after the copy — no engine build step.
         if (!provider.descriptor.requiresEngineBuild || !provider.createBuildJob) {

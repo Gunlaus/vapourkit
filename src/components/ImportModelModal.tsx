@@ -168,12 +168,12 @@ export const ImportModelModal = memo<ImportModelModalProps>(({
               <div>
                 <p className="text-[10px] font-display font-semibold uppercase tracking-[0.09em] text-ink-500">Shape Mode</p>
                 <p className="text-[11px] text-ink-500 mt-0.5 mb-1.5 min-h-[30px]">
-                  {!isBuilding && importForm.prepareOnUse !== false ? 'Automatic (workflow resolution)' : importForm.useStaticShape ? 'Static (single resolution)' : 'Dynamic (multiple resolutions)'}
+                  {importForm.useStaticShape ? 'Static (single resolution)' : 'Dynamic (multiple resolutions)'}
                 </p>
                 <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => handleShapeModeChange(false)}
-                    disabled={isImporting || (!isBuilding && importForm.prepareOnUse !== false)}
+                    disabled={isImporting}
                     className={`${OPT} ${
                       !importForm.useStaticShape
                         ? OPT_ON
@@ -184,7 +184,7 @@ export const ImportModelModal = memo<ImportModelModalProps>(({
                   </button>
                   <button
                     onClick={() => handleShapeModeChange(true)}
-                    disabled={isImporting || (!isBuilding && importForm.prepareOnUse !== false)}
+                    disabled={isImporting}
                     className={`${OPT} ${
                       importForm.useStaticShape
                         ? OPT_ON
@@ -310,7 +310,7 @@ export const ImportModelModal = memo<ImportModelModalProps>(({
         )}
 
         {/* Build command - only for backends with a custom build step */}
-        {backend.supportsCustomBuildParams && (isBuilding || importForm.prepareOnUse === false) && (
+        {backend.supportsCustomBuildParams && (
           <section className="mt-2 border-t border-ink-700">
             <ModalSectionHeader icon={Info} title="TensorRT Build Command" />
             <div className="px-4 py-3">

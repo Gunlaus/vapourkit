@@ -28,6 +28,7 @@ import os
 import sys
 import time
 from collections import defaultdict
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 
@@ -1711,6 +1712,7 @@ def main(argv):
 
     label = os.path.splitext(os.path.basename(opts['onnx']))[0]
     print(f'[vk-build] begin Building TensorRT engine: {label}', flush=True)
+    locks = ExitStack()
     try:
         if opts.get('adapter') != 'rgb-window-v1':
             # vs-mlrt owns RIFE/DPIR and other custom wrapper contracts.
@@ -1723,6 +1725,9 @@ def main(argv):
                 report_progress(100)
             return status
         target = opts['save_engine']
+        # Two builds of one engine (another window, a retry) take turns.
+        from vk_model_runtime import engine_build_lock
+        locks.enter_context(engine_build_lock(target))
         candidate = target + '.candidate-' + str(os.getpid())
         opts['save_engine'] = candidate
         try:
@@ -1766,6 +1771,7 @@ def main(argv):
                 print('Validation report: ' + target + '.validation-report.json', file=sys.stderr)
         return 1
     finally:
+        locks.close()
         print(f'[vk-build] end {label}', flush=True)
 
 

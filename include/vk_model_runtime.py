@@ -1,6 +1,7 @@
-"""Model/engine compatibility shared by the builder and VapourSynth runtime.
+"""Model/engine helpers shared by the engine builder and VapourSynth scripts.
 
-Engine files are disposable caches. Model packages and saved workflows are not.
+The build dialog builds one engine per model, normally with a dynamic shape
+profile. Scripts only load that engine; they never build one.
 No third-party Python adapters or native plugins are downloaded by this module.
 """
 import ctypes
@@ -17,25 +18,14 @@ import time
 
 SCHEMA = 1
 ADAPTER = 'rgb-window-v1'
-# Bump when an existing validated engine becomes incompatible with this adapter.
-# Logging/cache helper edits must not invalidate every model's GPU engine.
+# Bump when learned build fallbacks become incompatible with this adapter.
 ENGINE_ABI = 1
 _IDENTITY = None
 
 
-def run_engine_builder(args):
-    """The parent stdout is a binary video pipe, never a diagnostic channel.
-
-    Use OS descriptors, not sys.stderr.fileno(): VSScript may replace the
-    Python streams with log adapters. Inheriting fd 1 corrupts Matroska even
-    when Python's sys.stdout has already been redirected.
-    """
-    return subprocess.run(args, check=True, timeout=1800, stdout=2, stderr=2)
-
-
 @contextmanager
 def engine_build_lock(engine, timeout=1800):
-    """Coordinate preview/validation/render processes; OS releases locks on exit."""
+    """Serialize builds of one engine across processes; the OS releases locks on exit."""
     with open(str(engine) + '.prepare.lock', 'a+b') as stream:
         stream.seek(0, 2)
         if stream.tell() == 0: stream.write(b'\0'); stream.flush()
@@ -214,40 +204,6 @@ def runtime_identity():
     return _IDENTITY
 
 
-def compatibility_identity(identity):
-    """Exclude diagnostics/location, retaining the actual loaded plugin's bytes."""
-    result = {k: v for k, v in identity.items() if k != 'helper'}
-    result.setdefault('engineAbi', 1)
-    if isinstance(result.get('plugin'), dict):
-        plugin = dict(result['plugin'])
-        location = plugin.pop('path', None)
-        if not plugin.get('binarySha256') and location:
-            # Upgrade a legacy manifest in place logically, without trusting a
-            # different binary merely because its version string is the same.
-            if Path(location).is_file(): plugin['binarySha256'] = cached_digest(location)
-            else: plugin['unresolvedLegacyPath'] = location
-        result['plugin'] = plugin
-    return result
-
-
-def engine_rejection(manifest, contract, identity, shape, precision, engine):
-    if not manifest: return 'missing or invalid validation manifest'
-    validation = manifest.get('validation')
-    accuracy = validation.get('accuracy') if isinstance(validation, dict) else None
-    if not isinstance(accuracy, dict) or accuracy.get('status') != 'passed': return 'cached engine lacks completed numerical validation'
-    if manifest['contract'] != contract: return 'model source, weights, or adapter contract changed'
-    saved, current = compatibility_identity(manifest['runtime']), compatibility_identity(identity)
-    if saved != current:
-        changed = ', '.join(k for k in sorted(set(saved) | set(current)) if saved.get(k) != current.get(k))
-        return 'runtime compatibility changed: ' + changed
-    if manifest.get('precision') != precision: return 'requested precision changed'
-    try:
-        if not covers(manifest['bindings']['inputs'][0], shape): return 'input shape is outside the validated engine profile'
-    except (KeyError, TypeError, ValueError, IndexError): return 'invalid engine profile metadata'
-    if manifest['engineSha256'] != cached_digest(engine): return 'engine integrity check changed'
-    return None
-
-
 def engine_details(engine_path):
     import tensorrt as trt
     logger = trt.Logger(trt.Logger.ERROR)
@@ -411,150 +367,92 @@ def validate_engine(engine_path, opts):
             'engineSha256': digest(engine_path), 'validation': {'execution': results, 'accuracy': accuracy}}
 
 
-def validate_output(output):
-    import numpy as np
-    for index in (0,):
-        frame = output.get_frame(index)
-        if not all(np.isfinite(np.asarray(frame[p])).all() for p in range(frame.format.num_planes)):
-            raise RuntimeError('The model produced NaN/Inf on the source video. Use a validated higher-precision model/build.')
-    return output
-
-
-_CHECKED = {}
-_CONTRACTS = {}
-
-def cached_contract(source):
-    def stamp(files):
-        result = []
-        for file in files:
-            p = Path(file)
-            if not p.exists(): return None
-            s = p.stat(); result.append((str(p), s.st_size, s.st_mtime_ns, s.st_ctime_ns))
-        return tuple(result)
-    key = str(source.resolve())
-    previous = _CONTRACTS.get(key)
-    if previous and stamp(previous[0]) == previous[1] and (str(source) + '.contract.json' in previous[0]) == Path(str(source) + '.contract.json').exists(): return previous[2]
-    disk = Path(str(source) + '.vk-contract-cache.json')
-    helper = digest(__file__)
+def engine_metadata(engine_path):
+    """The build manifest of an engine, or None for engines built without one."""
     try:
-        saved = json.loads(disk.read_text())
-        known = saved['files']
-        if saved['helper'] == helper and known[0] == key and saved['stamp'] == json.dumps(stamp(known)) and saved['descriptor'] == Path(str(source) + '.contract.json').exists():
-            contract = saved['contract']
-            _CONTRACTS[key] = (known, stamp(known), contract)
-            return contract
-    except (OSError, ValueError, KeyError, TypeError, IndexError): pass
-    contract = graph_contract(source)
-    files = [item['path'] for item in contract['files']]
-    descriptor = Path(str(source) + '.contract.json')
-    if descriptor.exists(): files.append(str(descriptor))
-    # Include the descriptor's existence even when the first read had none.
-    signature = (stamp(files), descriptor.exists())
-    _CONTRACTS[key] = (files, signature[0], contract)
-    stage = Path(str(disk) + '.' + str(os.getpid()) + '.tmp')
-    try:
-        stage.write_text(json.dumps({'helper': helper, 'files': files, 'stamp': json.dumps(signature[0]), 'descriptor': descriptor.exists(), 'contract': contract}))
-        os.replace(stage, disk)
-    except OSError: pass
-    finally:
-        try: stage.unlink(missing_ok=True)
-        except OSError: pass
-    return contract
-
-def read_manifest(file):
-    try:
-        value = json.loads(Path(file).read_text())
+        value = json.loads(Path(str(engine_path) + '.json').read_text())
         if not isinstance(value, dict) or value.get('schema') != SCHEMA: return None
-        if not isinstance(value.get('runtime'), dict) or not isinstance(value.get('bindings'), dict): return None
-        inputs = value['bindings'].get('inputs')
+        bindings = value.get('bindings')
+        inputs = bindings.get('inputs') if isinstance(bindings, dict) else None
         if not isinstance(inputs, list) or not inputs or not all(isinstance(i, dict) and isinstance(i.get('shape'), list) for i in inputs): return None
-        if not isinstance(value.get('engineSha256'), str): return None
-        if not isinstance(value.get('contract'), dict): return None
-        files = value['contract'].get('files')
-        if not isinstance(files, list) or not files or not all(isinstance(f, dict) and isinstance(f.get('path'), str) for f in files): return None
+        # A manifest describes one exact engine file; a replaced engine falls back to probing.
+        if not isinstance(value.get('engineSha256'), str) or value['engineSha256'] != cached_digest(engine_path): return None
         return value
     except (ValueError, OSError, TypeError): return None
 
 
-def load_model(clips, engine_path, streams, builder, python, precision='fp16'):
-    """Select/rebuild for the actual stage shape before any FFmpeg job starts."""
+def source_model(engine_path, manifest):
+    """Locate the ONNX an engine was built from, as recorded or by filename pairing."""
+    import re
+    candidates = []
+    if manifest and isinstance(manifest.get('sourceRelative'), str):
+        candidates.append(engine_path.parent / manifest['sourceRelative'])
+    candidates.append(engine_path.with_suffix('.onnx'))
+    candidates.append(Path(re.sub(r'_(fp16|fp32|bf16)\.engine$', '.onnx', str(engine_path), flags=re.IGNORECASE)))
+    return next((c for c in candidates if c.is_file()), None)
+
+
+def model_descriptor(source):
+    """Spatial multiple and scale recorded for a model package, if any."""
+    if source is None: return {}
+    try: value = json.loads(Path(str(source) + '.contract.json').read_text())
+    except (OSError, ValueError): return {}
+    return value if isinstance(value, dict) else {}
+
+
+def profile_range(binding):
+    shape = binding['shape']
+    if all(n > 0 for n in shape): return f'only {shape[3]}x{shape[2]}'
+    ranges = [f'{p[0][3]}x{p[0][2]} to {p[2][3]}x{p[2][2]}' for p in binding.get('profiles', [])]
+    return ' or '.join(ranges) if ranges else 'an unknown range'
+
+
+def probed_model(clips, engine_path, streams):
+    """Run an engine without a manifest, retrying once in the other float format.
+
+    vstrt needs the engine's I/O type, which comes from the ONNX: an FP16
+    export that keeps FP32 graph inputs builds an engine that wants RGBS.
+    """
+    import vapoursynth as vs
+    try:
+        return vs.core.trt.Model(clips, engine_path=str(engine_path), num_streams=streams)
+    except vs.Error as error:
+        if 'bits per sample mismatch' not in str(error): raise
+    fmt = vs.RGBS if clips[0].format.bits_per_sample == 16 else vs.RGBH
+    return vs.core.trt.Model([vs.core.resize.Point(c, format=fmt) for c in clips], engine_path=str(engine_path), num_streams=streams)
+
+
+def load_model(clips, engine_path, streams, **_unused):
+    """Run a prebuilt engine. A dynamic engine serves every size inside its profile."""
     supplied_window = isinstance(clips, list)
-    clips = clips if supplied_window else [clips]
-    first = clips[len(clips) // 2] if supplied_window else clips[0]
+    clips = list(clips) if supplied_window else [clips]
+    first = clips[len(clips) // 2]
     if any((c.width, c.height) != (first.width, first.height) for c in clips): raise RuntimeError('Temporal input dimensions differ.')
     if first.width <= 0 or first.height <= 0: raise RuntimeError('Resize variable-resolution input before this model; fixed stage dimensions are required.')
-    original = (first.width, first.height)
-    shape = [1, len(clips) * 3, first.height, first.width]
     engine_path = Path(engine_path)
-    sidecar = Path(str(engine_path) + '.json')
-    manifest = read_manifest(sidecar)
-    source = (engine_path.parent / manifest['sourceRelative']).resolve() if manifest and manifest.get('sourceRelative') else Path(manifest['contract']['files'][0]['path']) if manifest and manifest.get('contract') else engine_path.with_suffix('.onnx')
-    if not source.is_file() and engine_path.with_suffix('.onnx').is_file(): source = engine_path.with_suffix('.onnx')
-    if not source.is_file():
-        import re
-        source = Path(re.sub(r'_(fp16|fp32|bf16)\.engine$', '.onnx', str(engine_path)))
-    if not source.is_file(): raise RuntimeError('This engine has no source ONNX. Import its complete model package to validate or rebuild it.')
-    contract = cached_contract(source)
-    required_frames = contract['inputs'][0]['shape'][1] // 3
-    if len(clips) != required_frames:
+    if engine_path.suffix.lower() != '.engine' or not engine_path.is_file():
+        raise RuntimeError('TensorRT engine not found: ' + str(engine_path) + '. Build the model in Vapourkit before processing.')
+    manifest = engine_metadata(engine_path)
+    binding = manifest['bindings']['inputs'][0] if manifest else None
+    channels = binding['shape'][1] if binding and len(binding['shape']) == 4 else None
+    if isinstance(channels, int) and channels > 0 and channels % 3 == 0 and channels // 3 != len(clips):
         # The generator's VSR list is centered, so its middle clip is the source.
-        clips = temporal_window(first, required_frames) if required_frames > 1 else [first]
-        shape[1] = required_frames * 3
-    contract_key = hashlib.sha256(json.dumps(contract, sort_keys=True).encode()).hexdigest()
-    selected_precision = 'bf16' if contract['inputs'][0]['dtype'] == 16 or 16 in contract.get('weightTypes', []) else precision
-    check_key = (str(engine_path), tuple(shape), streams, contract_key, selected_precision)
-    cached = _CHECKED.get(check_key)
-    if cached and Path(cached[0]).exists() and cached_digest(cached[0]) == cached[2]:
-        return raw_model(clips, cached[0], streams, cached[1])
-    multiple = contract.get('spatialMultiple', 1)
+        clips = temporal_window(first, channels // 3) if channels > 3 else [first]
+    descriptor = model_descriptor(source_model(engine_path, manifest))
+    multiple = descriptor.get('spatialMultiple', 1)
+    if not isinstance(multiple, int) or not 1 <= multiple <= 256: raise RuntimeError('Invalid model spatial multiple in ' + str(engine_path) + '.')
+    original = (first.width, first.height)
     if first.width % multiple or first.height % multiple:
         import vapoursynth as vs
         right, bottom = (-first.width) % multiple, (-first.height) % multiple
         clips = [vs.core.std.AddBorders(c, right=right, bottom=bottom) for c in clips]
-        shape[2:4] = [clips[0].height, clips[0].width]
-    if contract['inputs'][0]['shape'][1] != shape[1]: raise RuntimeError('Configured temporal window disagrees with the model. Reimport with automatic detection.')
-    expected = contract['inputs'][0]['shape']
-    if any(isinstance(n, int) and n > 0 and n != shape[i] for i, n in enumerate(expected)):
-        raise RuntimeError('This model has a fixed input shape ' + str(expected) + '; resize/pad before the model or use a dynamic export.')
-    identity = runtime_identity()
-    reason = engine_rejection(manifest, contract, identity, shape, selected_precision, engine_path) if engine_path.is_file() else 'selected engine does not exist yet'
-    if reason is None:
-        selected, details = engine_path, manifest['bindings']
-    else:
-        key = hashlib.sha256(json.dumps([contract, compatibility_identity(identity), shape, selected_precision], sort_keys=True).encode()).hexdigest()[:24]
-        cache = source.parent / 'engines'; cache.mkdir(exist_ok=True)
-        selected = cache / (source.stem + '-' + key + '.engine')
-        metadata = Path(str(selected) + '.json')
-        found = None
-        # A legacy key or a broader validated profile can be reused. Never
-        # broaden profiles here: architecture-specific shape constraints remain.
-        alternatives = sorted((p for p in cache.iterdir() if p.name.startswith(source.stem + '-') and p.suffix == '.engine' and p != selected), key=lambda p: p.name)
-        rejected = []
-        for candidate in [selected, *alternatives]:
-            if not candidate.is_file(): continue
-            candidate_manifest = read_manifest(str(candidate) + '.json')
-            rejection = engine_rejection(candidate_manifest, contract, identity, shape, selected_precision, candidate)
-            if rejection is None:
-                selected, found = candidate, candidate_manifest
-                metadata = Path(str(selected) + '.json')
-                break
-            if len(rejected) < 3: rejected.append(candidate.name + ': ' + rejection)
-        if found is None:
-            with engine_build_lock(selected):
-                # The process we waited for may already have published it.
-                concurrent = read_manifest(metadata) if selected.is_file() else None
-                if engine_rejection(concurrent, contract, identity, shape, selected_precision, selected) is not None:
-                    print('[vk-cache] Building for ' + source.name + ' at ' + 'x'.join(map(str, shape)) + ': ' + reason + ('. Cached candidates: ' + '; '.join(rejected) if rejected else ''), file=sys.stderr, flush=True)
-                    args = [python, '-u', builder, '--onnx=' + str(source), '--saveEngine=' + str(selected),
-                            '--shapes=' + contract['inputs'][0]['name'] + ':' + 'x'.join(map(str, shape)), '--builderOptimizationLevel=3', '--vkAdapter=' + ADAPTER]
-                    if selected_precision != 'fp32': args.append('--' + selected_precision)
-                    run_engine_builder(args)
-        found = json.loads(metadata.read_text()); details = found['bindings']
-    print('[vk-cache] Using validated engine: ' + str(selected), file=sys.stderr, flush=True)
-    if original == (clips[0].width, clips[0].height): _CHECKED[check_key] = (selected, details, cached_digest(selected))
-    output = raw_model(clips, selected, streams, details)
-    # Force actual source-frame evaluation before the encode process is launched.
-    expected_scale = contract.get('descriptor', {}).get('scale')
+    shape = [1, len(clips) * 3, clips[0].height, clips[0].width]
+    if binding is not None and not covers(binding, shape):
+        if channels != shape[1]: raise RuntimeError('Configured temporal window disagrees with the engine. Reimport the model with automatic detection.')
+        raise RuntimeError(f'This TensorRT engine accepts {profile_range(binding)} (width x height), but this stage sends {shape[3]}x{shape[2]}. '
+                           'Rebuild the engine with a shape range that covers this resolution, or resize before the model.')
+    output = raw_model(clips, engine_path, streams, manifest['bindings']) if manifest else probed_model(clips, engine_path, streams)
+    expected_scale = descriptor.get('scale')
     if expected_scale and (output.width != clips[0].width * expected_scale or output.height != clips[0].height * expected_scale):
         raise RuntimeError('The model output dimensions disagree with its catalog adapter. Keep the previous model and report this catalog entry.')
     if original != (clips[0].width, clips[0].height):

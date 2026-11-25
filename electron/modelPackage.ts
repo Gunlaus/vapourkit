@@ -61,3 +61,9 @@ export async function listModelFiles(root: string): Promise<string[]> {
   const files = await fs.readdir(root, { recursive: true, encoding: 'utf8' }) as string[];
   return files.filter(file => !file.includes('.staging-') && !file.split(/[\\/]/).includes('engines') && /\.(onnx|engine)$/.test(file));
 }
+/** True when an ONNX has a built engine beside it, named `<stem>.engine` or `<stem>_<precision>.engine`. */
+export function hasBuiltEngine(onnxFile: string, engineFiles: readonly string[]): boolean {
+  const stem = onnxFile.replace(/\\/g, '/').replace(/\.onnx$/i, '');
+  const engines = new Set(engineFiles.map(file => file.replace(/\\/g, '/')));
+  return ['', '_fp16', '_fp32', '_bf16'].some(suffix => engines.has(`${stem}${suffix}.engine`));
+}

@@ -242,12 +242,13 @@ describe('inference backend selection', () => {
     expect(script).not.toContain('core.ort.Model');
   });
 
-  it('uses the validated loader to resolve actual I/O and workflow dimensions', async () => {
+  it('loads the prebuilt engine without building one at render time', async () => {
     const script = await generate([aiFilter(0, 'C:\\models\\m_fp16.engine')], false);
-    expect(script).toContain('_vk_models.load_model(clip, "C:/models/m_fp16.engine"');
     expect(script).toContain('vk_model_runtime as _vk_models');
-    expect(script).toContain('builder=');
-    expect(script).toContain('python=');
+    expect(script).toContain('clip = _vk_models.load_model(clip, "C:/models/m_fp16.engine", streams=');
+    expect(script).not.toContain('builder=');
+    expect(script).not.toContain('build_trt_engine');
+    expect(script).not.toContain('--shapes');
   });
 
   it('emits DirectML code when the default backend is directml', async () => {
