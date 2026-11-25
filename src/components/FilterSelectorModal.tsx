@@ -1,6 +1,6 @@
 import { FilterRepositoryModal } from './FilterRepositoryModal';
 import { memo, useState, useEffect, useMemo } from 'react';
-import { Filter as FilterIcon, Plus } from 'lucide-react';
+import { Filter as FilterIcon, Plus, Download } from 'lucide-react';
 import type { FilterTemplate } from '../electron.d';
 import { TemplateEditDialog } from './TemplateEditDialog';
 import { PickerChip, PickerModal, PickerRow, PickerSidebarSection } from './PickerModal';
@@ -197,21 +197,30 @@ export const FilterSelectorModal = memo<FilterSelectorModalProps>(({
             onSelect={setSelectedCategory}
           />
         }
-        listTop={
+        headerActions={
           <>
-          <button type="button" className="w-full px-3 py-2 text-left text-accent-400 border-b border-ink-800" onClick={() => setShowRepository(true)}>Get more filters</button>
-          <button
-            onClick={() => handleSelectTemplate('')}
-            className={`w-full h-9 px-3 border-b border-ink-900 transition-colors flex items-center gap-2 text-[12.5px] font-medium text-left ${
-              currentSelection === ''
-                ? 'bg-accent-500/15 text-accent-400 shadow-[inset_3px_0_0] shadow-accent-500'
-                : 'text-accent-400 hover:bg-ink-900 hover:text-accent-300'
-            }`}
-            title="Start with a blank filter"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Custom/New Filter</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => handleSelectTemplate('')}
+              className={`h-7 px-2.5 rounded inline-flex items-center gap-1.5 text-[11.5px] font-semibold border transition-colors ${
+                currentSelection === ''
+                  ? 'bg-accent-500/25 border-accent-500 text-accent-200'
+                  : 'bg-accent-500/10 border-accent-500/40 text-accent-300 hover:bg-accent-500/20'
+              }`}
+              title="Start with a blank filter"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Custom/New Filter
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowRepository(true)}
+              className="h-7 px-2.5 rounded inline-flex items-center gap-1.5 text-[11.5px] font-semibold bg-accent-500/10 border border-accent-500/40 text-accent-300 hover:bg-accent-500/20 transition-colors"
+              title="Browse and install VapourSynth plugins from VSRepo"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Get More Filters
+            </button>
           </>
         }
         current={currentSelection ? { label: currentSelection, clearLabel: 'Clear (Custom)', onClear: handleClearSelection } : null}
