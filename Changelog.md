@@ -3,7 +3,9 @@
 ## Unreleased
 
 ### Experimental GPU video pipeline
-- Repair the fingerprinted bundled FDAT v1.5 export's input alignment in a private derivative for both engine builders, preserving reflection padding, FP32 weights and source files.
+- Discover and cache spatial alignment for supported RGB image/temporal models, then apply a shared dynamic padding/cropping adapter without architecture-name rules or source edits. Honor declared border contracts and retain real-engine validation.
+- Include a same-engine diagnostic comparing the v2.1.0 direct inference call, the managed loader, and requested CUDA Graphs in isolated processes.
+- Isolate native engine caches by the full model identity, including external weights, to prevent different weights with the same graph from sharing an engine.
 - Add an optional Windows x64 NVEncC backend for full-video, single RGB image-model workflows with Simple NVIDIA encoding settings. The standard VapourSynth path remains the default.
 - Install checksum-pinned native dependencies in an isolated folder; cache FP32-boundary ONNX adapters without editing source models or changing their internal weights.
 - Preserve selected audio/subtitle tracks and subtitle attachments, check the completed output before publication, and report native throughput and whether GPU tensor sharing was confirmed.

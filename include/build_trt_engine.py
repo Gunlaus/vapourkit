@@ -1729,21 +1729,24 @@ def main(argv):
         from vk_model_runtime import engine_build_lock
         locks.enter_context(engine_build_lock(target))
         original_source = opts['onnx']
-        from vk_model_runtime import known_export_adapter, adapt_known_export
-        source_adapter = known_export_adapter(original_source)
+        from vk_model_runtime import spatial_contract, spatial_adaptation, adapt_spatial_model
+        report_status('Checking cached model spatial requirements; first use may run bounded CPU probes...')
+        spatial = spatial_contract(original_source, Path(__file__).resolve().parent / 'model-contracts')
+        source_adapter = spatial_adaptation(spatial)
+        if spatial.get('status') == 'unknown': report_status('Spatial discovery unavailable; retaining the original model and requiring real-engine validation.')
         if source_adapter:
             import tempfile
             import onnx
             folder = Path(locks.enter_context(tempfile.TemporaryDirectory(prefix='vk-model-adapter-')))
             adapted = folder / 'model.onnx'
             model = onnx.load(original_source)
-            adapt_known_export(model, source_adapter)
+            adapt_spatial_model(model, source_adapter)
             onnx.checker.check_model(model)
             onnx.save_model(model, adapted)
             opts['_original_onnx'] = original_source
-            opts['_source_adapter'] = source_adapter
+            opts['_source_adapter'] = source_adapter['id']
             opts['onnx'] = str(adapted)
-            report_status('Applying verified FDAT input-padding adapter; original model and precision stay unchanged.')
+            report_status(f'Applying spatial pad/crop adapter: multiple {source_adapter["multiple"]}, mode {source_adapter["mode"]}, scale {source_adapter["scale"]}; source and precision stay unchanged.')
         candidate = target + '.candidate-' + str(os.getpid())
         opts['save_engine'] = candidate
         try:
@@ -1753,7 +1756,7 @@ def main(argv):
                 from vk_model_runtime import digest
                 manifest['sourceRelative'] = os.path.relpath(original_source, Path(target).parent)
                 original_sha = digest(original_source)
-                manifest['sourceAdaptation'] = {'id': source_adapter, 'originalSha256': original_sha, 'preparedSha256': digest(opts['onnx'])}
+                manifest['sourceAdaptation'] = {'id': source_adapter['id'], 'multiple': source_adapter['multiple'], 'scale': source_adapter['scale'], 'mode': source_adapter['mode'], 'method': source_adapter['method'], 'originalSha256': original_sha, 'preparedSha256': digest(opts['onnx'])}
                 if 'contract' in manifest:
                     # The derivative is private and temporary; preserve a usable
                     # source identity and record its precise transformation above.

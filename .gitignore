@@ -15,3 +15,6 @@
 
 # Native plugin build output
 native/*/build/
+
+# Runtime discovery cache when invoking the bundled builder directly in a checkout.
+/include/model-contracts/

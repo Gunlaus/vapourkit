@@ -422,7 +422,7 @@ class ModelRuntimeTests(unittest.TestCase):
 FDAT_SOURCE = ROOT / 'include' / 'models' / '2x_bndl_animefilm_v1.5_FDAT_fp32.onnx'
 
 @unittest.skipUnless(FDAT_SOURCE.is_file(), 'Bundled FDAT fixture is excluded by sparse checkout')
-class KnownExportAdapterTests(unittest.TestCase):
+class SpatialAdapterReferenceTests(unittest.TestCase):
     def session(self, graph):
         import onnxruntime as ort
         options = ort.SessionOptions()
@@ -435,9 +435,10 @@ class KnownExportAdapterTests(unittest.TestCase):
         original_bytes = FDAT_SOURCE.read_bytes()
         original = onnx.load(FDAT_SOURCE)
         adapted = onnx.load(FDAT_SOURCE)
-        adapter_id = runtime.known_export_adapter(FDAT_SOURCE)
-        self.assertEqual(adapter_id, runtime.FDAT_PAD16_ADAPTER)
-        runtime.adapt_known_export(adapted, adapter_id)
+        with tempfile.TemporaryDirectory() as cache:
+            contract = runtime.spatial_contract(FDAT_SOURCE, cache)
+        self.assertEqual(contract['multiple'], 16)
+        runtime.adapt_spatial_model(adapted, contract)
         onnx.checker.check_model(adapted)
         before, after = self.session(original), self.session(adapted)
         rng = np.random.default_rng(12)
@@ -460,15 +461,6 @@ class KnownExportAdapterTests(unittest.TestCase):
         self.assertTrue(all(adapted_weights[k] == v for k, v in original_weights.items()))
         self.assertEqual(FDAT_SOURCE.read_bytes(), original_bytes)
 
-    def test_name_is_not_used_to_identify_an_export(self):
-        with tempfile.TemporaryDirectory() as folder:
-            renamed = Path(folder) / 'renamed.onnx'
-            renamed.write_bytes(FDAT_SOURCE.read_bytes())
-            self.assertEqual(runtime.known_export_adapter(renamed), runtime.FDAT_PAD16_ADAPTER)
-            changed = bytearray(renamed.read_bytes()); changed[-1] ^= 1
-            renamed.write_bytes(changed)
-            self.assertIsNone(runtime.known_export_adapter(renamed))
-
     def test_builder_uses_private_adaptation_and_keeps_original_source_provenance(self):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / 'fdat.engine'
@@ -477,7 +469,7 @@ class KnownExportAdapterTests(unittest.TestCase):
                 used.append(Path(opts['onnx']))
                 self.assertNotEqual(used[-1], FDAT_SOURCE)
                 graph = onnx.load(used[-1])
-                self.assertTrue(any(n.output[0] == '__vk_fdat_pad16_pads' for n in graph.graph.node))
+                self.assertTrue(any(n.output[0] == '__vk_spatial_pads' for n in graph.graph.node))
                 Path(opts['save_engine']).write_bytes(b'fixture engine')
                 return 0, {'schema': 1, 'validation': {}}
             with patch.dict(sys.modules, {'tensorrt': types.SimpleNamespace()}), patch.object(builder, 'build_validated_candidate', build_candidate):
@@ -485,14 +477,14 @@ class KnownExportAdapterTests(unittest.TestCase):
             self.assertEqual(status, 0)
             metadata = json.loads(Path(str(target) + '.json').read_text())
             self.assertEqual((target.parent / metadata['sourceRelative']).resolve(), FDAT_SOURCE.resolve())
-            self.assertEqual(metadata['sourceAdaptation']['id'], runtime.FDAT_PAD16_ADAPTER)
+            self.assertEqual(metadata['sourceAdaptation']['id'], runtime.SPATIAL_ADAPTER)
             self.assertFalse(used[0].exists())
 
     def test_native_adapter_keeps_fp32_and_matches_padded_reference(self):
         import prepare_nvencc_model as native
         with tempfile.TemporaryDirectory() as folder:
             prepared = native.prepare(FDAT_SOURCE, Path(folder) / 'cache')
-            self.assertEqual(prepared['sourceAdaptation'], runtime.FDAT_PAD16_ADAPTER)
+            self.assertEqual(prepared['sourceAdaptation'], runtime.SPATIAL_ADAPTER)
             graph = onnx.load(prepared['model'])
             session = self.session(graph)
             original = self.session(onnx.load(FDAT_SOURCE))
@@ -501,6 +493,125 @@ class KnownExportAdapterTests(unittest.TestCase):
             actual = session.run(None, {session.get_inputs()[0].name: data})[0]
             np.testing.assert_allclose(actual, expected, atol=1e-5, rtol=1e-5)
             self.assertEqual(native.prepare(FDAT_SOURCE, Path(folder) / 'cache')['model'], prepared['model'])
+
+
+
+class SpatialDiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+    def tearDown(self): self.temp.cleanup()
+
+    def export(self, block=8, channels=3, weight=1):
+        source = self.root / 'arbitrary-model.onnx'
+        input = helper.make_tensor_value_info('pixels', TensorProto.FLOAT, [1, channels, 'h', 'w'])
+        output = helper.make_tensor_value_info('rgb', TensorProto.FLOAT, [1, 3, 'oh', 'ow'])
+        nodes = [helper.make_node('SpaceToDepth', ['pixels'], ['blocked'], blocksize=block),
+            helper.make_node('DepthToSpace', ['blocked'], ['restored'], blocksize=block),
+            helper.make_node('Slice', ['restored', 'start', 'end', 'axis'], ['first']),
+            helper.make_node('Mul', ['first', 'weight'], ['rgb'])]
+        constants = [helper.make_tensor(n, TensorProto.INT64, [1], [v]) for n, v in [('start', 0), ('end', 3), ('axis', 1)]]
+        constants.append(helper.make_tensor('weight', TensorProto.FLOAT, [1], [weight]))
+        graph = helper.make_graph(nodes, 'unknown-architecture', [input], [output], constants)
+        onnx.save_model(helper.make_model(graph, opset_imports=[helper.make_opsetid('', 17)], ir_version=10), source)
+        return source
+
+    def test_discovers_layout_without_model_or_architecture_names_and_caches_it(self):
+        source = self.export()
+        contract = runtime.spatial_contract(source, self.root / 'cache')
+        self.assertEqual((contract['multiple'], contract['scale']), (8, 1))
+        with patch.object(runtime.subprocess, 'run', side_effect=AssertionError('Warm discovery must not run inference')):
+            self.assertEqual(runtime.spatial_contract(source, self.root / 'cache'), contract)
+
+    def test_non_power_of_two_and_nine_frame_layouts(self):
+        source = self.export(block=3, channels=27)
+        contract = runtime.spatial_contract(source, self.root / 'cache')
+        self.assertEqual((contract['multiple'], contract['scale']), (3, 1))
+        graph = onnx.load(source)
+        runtime.adapt_spatial_model(graph, contract)
+        import onnxruntime as ort
+        options = ort.SessionOptions(); options.intra_op_num_threads = 2
+        session = ort.InferenceSession(graph.SerializeToString(), sess_options=options, providers=['CPUExecutionProvider'])
+        data = np.random.default_rng(5).uniform(.1, .9, (1, 27, 25, 29)).astype(np.float32)
+        np.testing.assert_allclose(session.run(None, {'pixels': data})[0], data[:, :3], atol=1e-6)
+
+    def test_already_general_shapes_are_not_wrapped(self):
+        source = self.export(block=1)
+        contract = runtime.spatial_contract(source, self.root / 'cache')
+        self.assertEqual(contract['multiple'], 1)
+        self.assertIsNone(runtime.spatial_adaptation(contract))
+
+    def test_explicit_border_contract_and_source_changes_invalidate_the_cache(self):
+        source = self.export()
+        metadata = Path(str(source) + '.contract.json')
+        metadata.write_text(json.dumps({'spatialMultiple': 8, 'scale': 1, 'paddingMode': 'edge'}))
+        with patch.object(runtime.subprocess, 'run', side_effect=AssertionError('Declared layouts do not need probes')):
+            first = runtime.spatial_contract(source, self.root / 'cache')
+            self.export(weight=2)
+            second = runtime.spatial_contract(source, self.root / 'cache')
+        self.assertEqual(first['mode'], 'edge')
+        self.assertNotEqual(first['identity'], second['identity'])
+
+    def test_timeout_is_cached_without_guessing_a_padding_multiple(self):
+        source = self.export()
+        with patch.object(runtime.subprocess, 'run', side_effect=runtime.subprocess.TimeoutExpired('probe', 45)) as worker:
+            first = runtime.spatial_contract(source, self.root / 'cache')
+            second = runtime.spatial_contract(source, self.root / 'cache')
+        self.assertEqual(worker.call_count, 1)
+        self.assertEqual(first['status'], 'unknown')
+        self.assertEqual(first, second)
+        self.assertIsNone(runtime.spatial_adaptation(first))
+
+    def test_nine_frame_real_export_uses_the_same_adapter(self):
+        source = ROOT / 'include/models/2x_bndl_animefilm_v3_1x27xHxW_dyn-HW_fp32_op20.onnx'
+        if not source.exists(): self.skipTest('Bundled temporal fixture is excluded by sparse checkout')
+        contract = runtime.spatial_contract(source, self.root / 'cache')
+        self.assertEqual((contract['multiple'], contract['scale']), (16, 2))
+        graph = onnx.load(source); before = source.read_bytes()
+        runtime.adapt_spatial_model(graph, contract); onnx.checker.check_model(graph)
+        import onnxruntime as ort
+        options = ort.SessionOptions(); options.intra_op_num_threads = 2; options.inter_op_num_threads = 1
+        original = ort.InferenceSession(str(source), sess_options=options, providers=['CPUExecutionProvider'])
+        adapted = ort.InferenceSession(graph.SerializeToString(), sess_options=options, providers=['CPUExecutionProvider'])
+        data = np.full((1, 27, 24, 32), .25, np.float32)
+        expected = original.run(None, {'input': np.pad(data, ((0, 0), (0, 0), (0, 8), (0, 0)), mode='reflect')})[0][:, :, :48, :64]
+        actual = adapted.run(None, {'input': data})[0]
+        np.testing.assert_allclose(actual, expected, atol=1e-5, rtol=1e-5)
+        self.assertEqual(source.read_bytes(), before)
+
+
+
+
+class RuntimeComparisonTests(unittest.TestCase):
+    def test_comparison_uses_separate_processes_with_identical_engine_and_dimensions(self):
+        import benchmark_model_runtime as benchmark
+        with tempfile.TemporaryDirectory() as folder:
+            engine = Path(folder) / 'engine with spaces.engine'; engine.write_bytes(b'fixture')
+            report = Path(folder) / 'results.json'
+            calls = []
+            def run(command, **kwargs):
+                calls.append(command)
+                mode = command[command.index('--mode') + 1]
+                value = {'binding': {'shape': [1, 15, -1, -1], 'dtype': 'DataType.FLOAT'}} if mode == 'inspect' else {'status': 'completed', 'mode': mode, 'fps': 10}
+                return types.SimpleNamespace(returncode=0, stdout=('plugin output\n' + json.dumps(value) + '\n').encode(), stderr=b'')
+            with patch.object(benchmark.subprocess, 'run', side_effect=run):
+                self.assertEqual(benchmark.main(['--engine', str(engine), '--compare', '--report', str(report)]), 0)
+            self.assertEqual([c[c.index('--mode') + 1] for c in calls], ['inspect', 'original', 'managed', 'managed-graphs'])
+            for call in calls:
+                self.assertEqual(call[call.index('--engine') + 1], str(engine))
+                self.assertEqual(call[call.index('--width') + 1], '1920')
+                self.assertEqual(call[call.index('--streams') + 1], '2')
+            self.assertEqual(len(json.loads(report.read_text())['results']), 3)
+
+    def test_benchmark_timeout_returns_a_failure_instead_of_a_successful_fps(self):
+        import benchmark_model_runtime as benchmark
+        with tempfile.TemporaryDirectory() as folder:
+            engine = Path(folder) / 'engine.engine'; engine.write_bytes(b'fixture')
+            args = benchmark.arguments(['--engine', str(engine)])
+            with patch.object(benchmark.subprocess, 'run', side_effect=benchmark.subprocess.TimeoutExpired('worker', 300)):
+                result = benchmark.child(args, 'original')
+            self.assertEqual(result['status'], 'failed')
+            self.assertNotIn('fps', result)
 
 
 if __name__ == '__main__': unittest.main()

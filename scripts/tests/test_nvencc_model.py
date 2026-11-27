@@ -81,4 +81,28 @@ class NativeModelTests(unittest.TestCase):
             adapter.prepare(source, self.root / 'cache')
 
 
+
+    def test_external_weights_with_identical_graph_and_preserved_timestamps_get_distinct_engines(self):
+        import os
+        source = self.model(TensorProto.FLOAT16)
+        graph = onnx.load(source)
+        for value in (graph.graph.input[0], graph.graph.output[0]):
+            value.type.tensor_type.shape.dim[2].dim_value = 32
+            value.type.tensor_type.shape.dim[3].dim_value = 32
+        graph.graph.initializer[0].CopyFrom(onnx.numpy_helper.from_array(np.ones((1, 3, 32, 32), np.float16) / 8, name='weight'))
+        onnx.save_model(graph, source, save_as_external_data=True, all_tensors_to_one_file=True, location='large.weights', size_threshold=0)
+        weights = self.root / 'large.weights'
+        signature = weights.stat()
+        first = adapter.prepare(source, self.root / 'cache')
+        weights.write_bytes((np.ones((1, 3, 32, 32), np.float16) / 4).tobytes())
+        os.utime(weights, ns=(signature.st_atime_ns, signature.st_mtime_ns))
+        second = adapter.prepare(source, self.root / 'cache')
+        self.assertEqual(weights.stat().st_size, signature.st_size)
+        self.assertEqual(weights.stat().st_mtime_ns, signature.st_mtime_ns)
+        self.assertNotEqual(first['engineIdentity'], second['engineIdentity'])
+        self.assertNotEqual(first['model'], second['model'])
+        self.assertEqual(Path(first['model']).read_bytes(), Path(second['model']).read_bytes())
+        self.assertNotEqual((Path(first['model']).parent / 'weights.bin').read_bytes(), (Path(second['model']).parent / 'weights.bin').read_bytes())
+
+
 if __name__ == '__main__': unittest.main()

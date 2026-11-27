@@ -14,7 +14,7 @@ export const componentEntrySchema = z.object({
   licenseUrl: z.string().url().refine(v => httpsLink(v)),
   channel: z.enum(['stable', 'experimental']), notes: z.string().max(2000), license: z.string().min(1).max(300),
   files: z.array(asset).min(1).max(4096),
-  model: z.object({ file: safePath, adapter: z.enum(['rgb-image-v1', 'rgb-window-v1']), type: z.enum(['image', 'vsr']), scale: z.number().int().min(1).max(8), frames: z.number().int().positive().max(63).refine(n => n % 2 === 1), spatialMultiple: z.number().int().min(1).max(256) }).strict(),
+  model: z.object({ file: safePath, adapter: z.enum(['rgb-image-v1', 'rgb-window-v1']), type: z.enum(['image', 'vsr']), scale: z.number().int().min(1).max(8), frames: z.number().int().positive().max(63).refine(n => n % 2 === 1), spatialMultiple: z.number().int().min(1).max(256), paddingMode: z.enum(['reflect', 'edge', 'constant']).optional() }).strict(),
 }).strict().superRefine((entry, ctx) => {
   if (entry.model && (entry.model.adapter === 'rgb-window-v1') !== (entry.model.frames > 1)) ctx.addIssue({ code: 'custom', message: 'Model adapter and temporal window disagree' });
   if (entry.files.some(f => !/\.(onnx|bin|data|onnx_data)$/i.test(f.path))) ctx.addIssue({ code: 'custom', message: 'Model catalogs may contain only ONNX graphs and weight data' });

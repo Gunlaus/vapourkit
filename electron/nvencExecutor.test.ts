@@ -47,7 +47,7 @@ beforeEach(async () => {
       if (phase === 'probe') {
         const result = args[args.length - 1] === input ? streams : streams.filter(s => !control.missingTracks || s.codec_type === 'video').map(s => s.codec_type === 'video' ? { ...s, codec_name: 'av1', width: 3840, height: 2160 } : s);
         proc.stdout.write(JSON.stringify({ streams: result }));
-      } else if (phase === 'prepare') proc.stdout.write(JSON.stringify({ model, inputShape: [1, 3, 'h', 'w'], outputShape: [1, 3, 'h', 'w'] }));
+      } else if (phase === 'prepare') proc.stdout.write(JSON.stringify({ model, engineIdentity: 'fixture-weight-identity', inputShape: [1, 3, 'h', 'w'], outputShape: [1, 3, 'h', 'w'] }));
       else proc.stderr.write('onnx: path cuda-zerocopy initialized\n[100.0%] 240 frames: 30.00 fps\nencoded 240 frames, 30.00 fps\n');
       proc.stdout.end(); proc.stderr.end(); proc.emit('close', 0);
     });
@@ -64,6 +64,8 @@ describe('NVEncC native lifecycle', () => {
     await executor.execute(request(), () => false, () => 'image');
     expect(await fs.readFile(output, 'utf8')).toBe('encoded');
     expect(control.spawn.mock.calls.some(c => c[0].endsWith('NVEncC64.exe'))).toBe(true);
+    const nativeArgs = control.spawn.mock.calls.find(c => c[0].endsWith('NVEncC64.exe'))![1] as string[];
+    expect(nativeArgs[nativeArgs.indexOf('--vpp-onnx-cache-dir') + 1]).toBe(path.join(root, 'nvencc', 'engine-cache', 'fixture-weight-identity'));
     expect(control.spawn.mock.calls.some(c => c[0].includes('vspipe'))).toBe(false);
     expect(send.mock.calls.some(c => c[0] === 'upscale-progress' && c[1].type === 'complete')).toBe(true);
     expect(log.mock.calls.some(c => c[0].includes('"gpuTensorSharingConfirmed":true'))).toBe(true);

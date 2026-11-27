@@ -22,46 +22,8 @@ ADAPTER = 'rgb-window-v1'
 ENGINE_ABI = 1
 _IDENTITY = None
 
-# Exact bundled export with an even-only input pad before a stride-2/window-8
-# attention stage. Never identify an export repair from a filename alone.
-FDAT_PAD16_SHA256 = '99961e059c40166c8f4ecd99519f35228de317eea8788826540f8b7a34c0bfa6'
+# Retained only to recognize manifests created before the shared adapter.
 FDAT_PAD16_ADAPTER = 'bndl-fdat-v1.5-pad16-v1'
-
-
-def known_export_adapter(source):
-    source = Path(source)
-    if source.stat().st_size == 16524657 and digest(source) == FDAT_PAD16_SHA256:
-        return FDAT_PAD16_ADAPTER
-    return None
-
-
-def adapt_known_export(model, adapter):
-    """Repair one fingerprinted export's shape plumbing; keep weights/types intact.
-
-    FDAT's existing output Slice already crops the padded result to 2x the
-    original dimensions. Only replace its even-only input padding calculation.
-    At dimensions divisible by 16 this adds zero padding and preserves outputs.
-    """
-    if adapter is None: return
-    if adapter != FDAT_PAD16_ADAPTER: raise ValueError('Unknown model export adapter: ' + str(adapter))
-    import onnx
-    prefix = '__vk_fdat_pad16_'
-    pads = [n for n in model.graph.node if n.op_type == 'Pad' and n.input[0] == 'input']
-    if len(pads) != 1 or any(name.startswith(prefix) for n in model.graph.node for name in n.output):
-        raise RuntimeError('The fingerprinted FDAT graph does not match its input-padding adapter.')
-    pad = pads[0]
-    for name, values in [('axes', [2, 3]), ('multiple', [16]), ('zeros', [0] * 6)]:
-        model.graph.initializer.append(onnx.helper.make_tensor(prefix + name, onnx.TensorProto.INT64, [len(values)], values))
-    nodes = [
-        onnx.helper.make_node('Shape', ['input'], [prefix + 'shape']),
-        onnx.helper.make_node('Gather', [prefix + 'shape', prefix + 'axes'], [prefix + 'hw'], axis=0),
-        onnx.helper.make_node('Neg', [prefix + 'hw'], [prefix + 'negative']),
-        onnx.helper.make_node('Mod', [prefix + 'negative', prefix + 'multiple'], [prefix + 'bottom_right']),
-        onnx.helper.make_node('Concat', [prefix + 'zeros', prefix + 'bottom_right'], [prefix + 'pads'], axis=0),
-    ]
-    position = list(model.graph.node).index(pad)
-    pad.input[1] = prefix + 'pads'
-    for node in reversed(nodes): model.graph.node.insert(position, node)
 
 
 @contextmanager
@@ -94,6 +56,156 @@ def engine_build_lock(engine, timeout=1800):
             stream.seek(0)
             if os.name == 'nt': msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else: fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+SPATIAL_ADAPTER = 'spatial-pad-crop-v1'
+SPATIAL_PROBE_TIMEOUT = 45
+
+
+def _spatial_probe(source):
+    """Bounded CPU discovery; acceptance is sampled, not a proof for every shape."""
+    import numpy as np
+    import onnxruntime as ort
+    _, inputs, outputs = inspect_bindings(source)
+    if len(inputs) != 1 or len(outputs) != 1:
+        return {'status': 'unknown', 'reason': 'A dedicated multi-tensor adapter is required.'}
+    binding = inputs[0]
+    shape = binding['shape']
+    if len(shape) != 4 or not isinstance(shape[1], int) or shape[1] < 3 or shape[1] % 3 or (shape[1] // 3) % 2 == 0:
+        return {'status': 'unknown', 'reason': 'Automatic spatial discovery supports odd channel-packed NCHW RGB inputs.'}
+    if any(isinstance(n, int) and n > 0 for n in shape[2:]):
+        return {'status': 'fixed', 'reason': 'Static model dimensions are retained.'}
+    dtype = {1: np.float32, 10: np.float16}.get(binding['dtype'])
+    if dtype is None: return {'status': 'unknown', 'reason': 'CPU spatial discovery cannot execute this input type.'}
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 2
+    options.inter_op_num_threads = 1
+    options.enable_cpu_mem_arena = False
+    options.log_severity_level = 4
+    session = ort.InferenceSession(str(source), sess_options=options, providers=['CPUExecutionProvider'])
+    probes = {}
+    def run(h, w):
+        key = str(h) + 'x' + str(w)
+        if key in probes: return probes[key].get('scale')
+        try:
+            result = session.run([outputs[0]['name']], {binding['name']: np.full((1, shape[1], h, w), .25, dtype=dtype)})[0]
+            if result.ndim != 4 or result.shape[:2] != (1, 3) or not np.isfinite(result).all():
+                raise ValueError('Expected finite NCHW RGB output.')
+            sy, sx = result.shape[2] / h, result.shape[3] / w
+            if sy != sx or not sy.is_integer() or not 1 <= sy <= 16:
+                raise ValueError('Output scale is not a uniform positive integer.')
+            probes[key] = {'scale': int(sy)}
+            return int(sy)
+        except Exception as error:
+            probes[key] = {'error': str(error)[-500:]}
+            return None
+    # Prefer small valid anchors; each candidate is checked on BOTH axes.
+    anchor = next((n for n in (32, 48, 64, 96, 128) if run(n, n) is not None), None)
+    if anchor is None: return {'status': 'unknown', 'reason': 'No small valid reference shape.', 'probes': probes}
+    for multiple in (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64):
+        base = (anchor + multiple - 1) // multiple * multiple
+        scales = [run(base, base), run(base + multiple, base), run(base, base + multiple)]
+        if scales[0] is not None and scales[0] == scales[1] == scales[2]:
+            return {'status': 'observed', 'multiple': multiple, 'scale': scales[0], 'method': 'bounded-cpu-probes', 'probes': probes}
+    return {'status': 'unknown', 'reason': 'No common spatial multiple found within the probe budget.', 'probes': probes}
+
+
+def spatial_contract(source, cache):
+    """Cache layout requirements by source/weights/metadata; never by architecture name."""
+    import tempfile
+    source, cache = Path(source).resolve(), Path(cache)
+    contract = graph_contract(source)
+    descriptor = contract['descriptor']
+    mode = descriptor.get('paddingMode', contract.get('inputPaddingMode') or 'reflect')
+    if mode not in ('reflect', 'edge', 'constant'): raise ValueError('Unsupported model paddingMode.')
+    from importlib.metadata import version, PackageNotFoundError
+    try: probe_runtime = version('onnxruntime')
+    except PackageNotFoundError: probe_runtime = 'missing'
+    identity = {'abi': SPATIAL_ADAPTER, 'files': contract['files'], 'descriptor': descriptor, 'ort': probe_runtime, 'python': list(sys.version_info[:2])}
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    target = cache / (key + '.json')
+    try:
+        value = json.loads(target.read_text(encoding='utf8'))
+        if value.get('identity') == identity and value.get('status') in ('observed', 'declared', 'fixed', 'unknown'):
+            return value
+    except (OSError, ValueError, TypeError): pass
+    multiple, scale = descriptor.get('spatialMultiple', 1), descriptor.get('scale')
+    if multiple > 1 and isinstance(scale, int) and 1 <= scale <= 16:
+        value = {'status': 'declared', 'multiple': multiple, 'scale': scale, 'method': 'model-contract'}
+    else:
+        try:
+            result = subprocess.run([sys.executable, '-I', str(Path(__file__).resolve()), '--probe-spatial', str(source)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=SPATIAL_PROBE_TIMEOUT, check=False)
+            if result.returncode: raise RuntimeError(result.stderr.decode(errors='replace')[-700:])
+            value = json.loads(result.stdout)
+        except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError) as error:
+            # Discovery failure never turns into an invented alignment. The normal
+            # real-engine validation still decides whether this model is runnable.
+            value = {'status': 'unknown', 'reason': str(error)[-700:]}
+    value.update(identity=identity, id=SPATIAL_ADAPTER, mode=mode)
+    cache.mkdir(parents=True, exist_ok=True)
+    file = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf8', dir=cache, delete=False) as stream:
+            file = Path(stream.name)
+            json.dump(value, stream, sort_keys=True)
+        os.replace(file, target)
+    finally:
+        if file and file.exists(): file.unlink()
+    return value
+
+
+def spatial_adaptation(contract):
+    return contract if contract.get('status') in ('observed', 'declared') and contract.get('multiple', 1) > 1 else None
+
+
+def adapt_spatial_model(model, contract):
+    """Wrap any supported NCHW RGB model with dynamic pad/crop, keeping its weights."""
+    if contract is None: return
+    import onnx
+    multiple, scale, mode = contract['multiple'], contract['scale'], contract['mode']
+    if not isinstance(multiple, int) or not 1 < multiple <= 256 or not isinstance(scale, int) or not 1 <= scale <= 16 or mode not in ('reflect', 'edge', 'constant'):
+        raise ValueError('Invalid spatial adapter contract.')
+    initializer_names = {t.name for t in model.graph.initializer}
+    inputs = [v for v in model.graph.input if v.name not in initializer_names]
+    if len(inputs) != 1 or len(model.graph.output) != 1: raise ValueError('Spatial adapter needs one RGB input and output.')
+    source_input, source_output = inputs[0], model.graph.output[0]
+    if len(source_input.type.tensor_type.shape.dim) != 4: raise ValueError('Spatial adapter needs NCHW input.')
+    original_input, original_output = source_input.name, source_output.name
+    names = {n for node in model.graph.node for n in list(node.input) + list(node.output)} | initializer_names
+    prefix = '__vk_spatial_'
+    while any(name.startswith(prefix) for name in names): prefix += '_'
+    padded, uncropped = prefix + 'padded', prefix + 'uncropped'
+    def rewrite(graph, mapping, root=False):
+        for node in graph.node:
+            for i, value in enumerate(node.input): node.input[i] = mapping.get(value, value)
+            for i, value in enumerate(node.output): node.output[i] = mapping.get(value, value)
+            for attr in node.attribute:
+                children = ([attr.g] if attr.HasField('g') else []) + list(attr.graphs)
+                for child in children:
+                    shadowed = {v.name for v in child.input} | {t.name for t in child.initializer}
+                    rewrite(child, {k: v for k, v in mapping.items() if k not in shadowed})
+        for value in list(graph.value_info) + ([] if root else list(graph.output)):
+            value.name = mapping.get(value.name, value.name)
+    rewrite(model.graph, {original_input: padded, original_output: uncropped}, root=True)
+    for name, values in [('axes', [2, 3]), ('multiple', [multiple]), ('zeros6', [0] * 6), ('starts', [0, 0]), ('scale', [scale])]:
+        model.graph.initializer.append(onnx.helper.make_tensor(prefix + name, onnx.TensorProto.INT64, [len(values)], values))
+    nodes = list(model.graph.node)
+    del model.graph.node[:]
+    # Nonnegative Mod arithmetic mirrors common exporter padding expressions.
+    model.graph.node.extend([
+        onnx.helper.make_node('Shape', [original_input], [prefix + 'shape']),
+        onnx.helper.make_node('Gather', [prefix + 'shape', prefix + 'axes'], [prefix + 'hw'], axis=0),
+        onnx.helper.make_node('Mod', [prefix + 'hw', prefix + 'multiple'], [prefix + 'remainder']),
+        onnx.helper.make_node('Sub', [prefix + 'multiple', prefix + 'remainder'], [prefix + 'remaining']),
+        onnx.helper.make_node('Mod', [prefix + 'remaining', prefix + 'multiple'], [prefix + 'bottom_right']),
+        onnx.helper.make_node('Concat', [prefix + 'zeros6', prefix + 'bottom_right'], [prefix + 'pads'], axis=0),
+        onnx.helper.make_node('Pad', [original_input, prefix + 'pads'], [padded], mode=mode),
+        *nodes,
+        onnx.helper.make_node('Mul', [prefix + 'hw', prefix + 'scale'], [prefix + 'ends']),
+        onnx.helper.make_node('Slice', [uncropped, prefix + 'starts', prefix + 'ends', prefix + 'axes'], [original_output]),
+    ])
 
 
 def temporal_window(clip, frames):
@@ -210,7 +322,10 @@ def graph_contract(source):
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
     multiple = metadata.get('spatialMultiple', 1)
     if not isinstance(multiple, int) or not 1 <= multiple <= 256: raise RuntimeError('Invalid model spatial multiple.')
-    return {'schema': SCHEMA, 'adapter': ADAPTER, 'descriptor': metadata, 'spatialMultiple': multiple, 'inputs': ins, 'outputs': outs, 'files': files,
+    pad_modes = {next((a.s.decode('utf8') for a in node.attribute if a.name == 'mode'), 'constant')
+                 for node in model.graph.node if node.op_type == 'Pad' and node.input[0] == ins[0]['name']}
+    input_padding_mode = next(iter(pad_modes)) if len(pad_modes) == 1 else None
+    return {'schema': SCHEMA, 'adapter': ADAPTER, 'descriptor': metadata, 'spatialMultiple': multiple, 'inputPaddingMode': input_padding_mode, 'inputs': ins, 'outputs': outs, 'files': files,
             'weightTypes': sorted(set(int(t.data_type) for t in model.graph.initializer))}
 
 
@@ -511,8 +626,8 @@ def load_model(clips, engine_path, streams, use_cuda_graph=False, **_unused):
         clips = temporal_window(first, channels // 3) if channels > 3 else [first]
     descriptor = model_descriptor(source_model(engine_path, manifest))
     multiple = descriptor.get('spatialMultiple', 1)
-    if manifest and manifest.get('sourceAdaptation', {}).get('id') == FDAT_PAD16_ADAPTER:
-        # This engine pads and crops internally, using the export's reflect mode.
+    if manifest and manifest.get('sourceAdaptation', {}).get('id') in (FDAT_PAD16_ADAPTER, SPATIAL_ADAPTER):
+        # This engine pads and crops internally, using its recorded border mode.
         # Do not add another, zero-padded border from legacy model metadata.
         multiple = 1
     if not isinstance(multiple, int) or not 1 <= multiple <= 256: raise RuntimeError('Invalid model spatial multiple in ' + str(engine_path) + '.')
@@ -541,6 +656,12 @@ def load_model(clips, engine_path, streams, use_cuda_graph=False, **_unused):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 3 and sys.argv[1] == '--probe-spatial':
+        try: print(json.dumps(_spatial_probe(sys.argv[2])))
+        except Exception as error:
+            print(str(error), file=sys.stderr)
+            raise SystemExit(1)
+        raise SystemExit(0)
     if len(sys.argv) == 3 and sys.argv[1] == '--reference':
         try: reference_worker(sys.argv[2])
         except Exception as error:

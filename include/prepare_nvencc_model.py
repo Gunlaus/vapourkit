@@ -14,7 +14,7 @@ from onnx import TensorProto, helper
 
 # Embedded Python's isolated path excludes application-owned sibling modules.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from vk_model_runtime import known_export_adapter, adapt_known_export
+from vk_model_runtime import spatial_contract, spatial_adaptation, adapt_spatial_model
 
 VERSION = 1
 
@@ -44,16 +44,18 @@ def tensors(graph):
             for child in attr.graphs: yield from tensors(child)
 
 
-def prepare(source, cache):
+def prepare(source, cache, contract_cache=None):
     source, cache = Path(source).resolve(), Path(cache)
     graph = onnx.load_model(source, load_external_data=False)
-    source_adapter = known_export_adapter(source)
-    adapt_known_export(graph, source_adapter)
     initializers = {t.name for t in graph.graph.initializer}
     inputs = [v for v in graph.graph.input if v.name not in initializers]
     outputs = list(graph.graph.output)
     if len(inputs) != 1 or len(outputs) != 1:
         raise ValueError('NVEncC requires a single-input/single-output RGB image model.')
+    for value in (inputs[0], outputs[0]):
+        dims = value.type.tensor_type.shape.dim
+        if len(dims) == 4 and dims[1].HasField('dim_value') and dims[1].dim_value != 3:
+            raise ValueError('NVEncC currently supports NCHW RGB image models with three input/output channels.')
     files = {str(source): [source.stat().st_size, source.stat().st_mtime_ns]}
     for tensor in tensors(graph.graph):
         if tensor.data_location == TensorProto.EXTERNAL:
@@ -63,11 +65,14 @@ def prepare(source, cache):
             if not location or not file.is_relative_to(source.parent):
                 raise ValueError('External weights must stay inside the model package.')
             files[str(file)] = [file.stat().st_size, file.stat().st_mtime_ns]
-    identity = [VERSION, files, source_adapter] if source_adapter else [VERSION, files]
+    contract = spatial_contract(source, contract_cache or cache.parent / 'spatial-contracts')
+    source_adapter = spatial_adaptation(contract)
+    adapt_spatial_model(graph, source_adapter)
+    identity = [VERSION, contract.get('identity', files), {k: source_adapter[k] for k in ('id', 'multiple', 'scale', 'mode')} if source_adapter else None]
     key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
     target = cache / key
     existing = ready(target)
-    if existing: return {**existing, 'model': str(target / 'model.onnx')}
+    if existing: return {**existing, 'model': str(target / 'model.onnx'), 'engineIdentity': key}
     try:
         inferred = onnx.shape_inference.infer_shapes(graph)
         graph = inferred
@@ -118,9 +123,9 @@ def prepare(source, cache):
         # Materialize a self-contained package; the original external-data files stay untouched.
         onnx.save_model(graph, stage / 'model.onnx', save_as_external_data=True, all_tensors_to_one_file=True, location='weights.bin', size_threshold=1024)
         onnx.checker.check_model(str(stage / 'model.onnx'))
-        result = {'schema': VERSION, 'source': str(source), 'inputShape': shapes[0], 'outputShape': shapes[1],
+        result = {'schema': VERSION, 'engineIdentity': key, 'source': str(source), 'inputShape': shapes[0], 'outputShape': shapes[1],
                   'files': [p.name for p in stage.iterdir() if p.is_file()]}
-        if source_adapter: result['sourceAdaptation'] = source_adapter
+        if source_adapter: result['sourceAdaptation'] = source_adapter['id']
         result['signatures'] = {p.name: [p.stat().st_size, p.stat().st_mtime_ns] for p in stage.iterdir() if p.is_file()}
         (stage / 'ready.json').write_text(json.dumps(result), encoding='utf-8')
         if ready(target): shutil.rmtree(stage)
@@ -145,8 +150,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
     parser.add_argument('--cache', required=True)
+    parser.add_argument('--contract-cache')
     args = parser.parse_args()
     try:
-        print(json.dumps(prepare(args.source, args.cache)))
+        print(json.dumps(prepare(args.source, args.cache, args.contract_cache)))
     except Exception as error:
         parser.exit(1, 'NVEncC model preparation failed: ' + str(error) + '\n')

@@ -114,7 +114,7 @@ export class NvencExecutor {
       const cache = path.join(PATHS.APP_DATA, 'nvencc', 'model-cache');
       const adapter = fixAsarPath(path.join(app.getAppPath(), 'include', 'prepare_nvencc_model.py'));
       this.log('[nvencc] Preparing a cached model adapter; the original model and engine remain untouched.');
-      const prepared = JSON.parse(await this.command(this.python, ['-I', adapter, '--source', sourcePath, '--cache', cache], setupVSEnvironment(this.python), undefined, 300000)) as { model: string; inputShape: Array<string | number>; outputShape: Array<string | number> };
+      const prepared = JSON.parse(await this.command(this.python, ['-I', adapter, '--source', sourcePath, '--cache', cache, '--contract-cache', path.join(PATHS.APP_DATA, 'model-contracts')], setupVSEnvironment(this.python), undefined, 300000)) as { model: string; engineIdentity?: string; inputShape: Array<string | number>; outputShape: Array<string | number> };
       for (const [index, actual] of [[2, video.height!], [3, video.width!]]) {
         const expected = prepared.inputShape[index];
         if (typeof expected === 'number' && expected > 0 && expected !== actual) throw new Error(`This ONNX model requires ${prepared.inputShape[3]}x${prepared.inputShape[2]} input; this source is ${video.width}x${video.height}. Choose a dynamic model or VapourSynth execution.`);
@@ -133,8 +133,11 @@ export class NvencExecutor {
       // under data/nvencc, so a relative path omits arbitrary install-directory
       // characters that NVEncC's comma-delimited filter parser cannot escape.
       const modelArgument = path.relative(path.dirname(executable), prepared.model);
-      const args = nvencArgs(request, source, modelArgument, path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache'), useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
-      await fs.ensureDir(path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache'));
+      // NVEncC fingerprints model.onnx itself, not its external weights.bin.
+      // Namespace its cache by the complete prepared source identity as well.
+      const engineCache = path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache', prepared.engineIdentity ?? path.basename(path.dirname(prepared.model)));
+      const args = nvencArgs(request, source, modelArgument, engineCache, useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
+      await fs.ensureDir(engineCache);
       const env = { ...process.env, PATH: path.dirname(executable) + path.delimiter + (process.env.PATH ?? '') };
       // Preserve user-supplied device masks. Both enumeration and NVEncC use
       // this same environment, so the CUDA ordinals stay consistent.
