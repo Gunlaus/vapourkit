@@ -893,6 +893,7 @@ it('emits multiple standard shader steps around VS filters for CPU encoding and 
     shader: { path: '/portable/old.glsl', presetId: 'vk-color', scale: 1, parameters: { GAIN: 1.25 } } };
   const script = await generate([shader, customFilter(1, 'Blur'), { ...shader, id: 'shader-b', order: 2 }]);
   expect(script.match(/core.placebo.Shader/g)?.length).toBe(2);
+  expect(script).toContain('clip.format.replace(sample_type=vs.INTEGER, bits_per_sample=16).id');
   expect(script.indexOf('core.placebo.Shader')).toBeLessThan(script.indexOf('# Custom Filter: Blur'));
   expect(script.lastIndexOf('core.placebo.Shader')).toBeGreaterThan(script.indexOf('# Custom Filter: Blur'));
 });

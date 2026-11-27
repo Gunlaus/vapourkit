@@ -486,7 +486,7 @@ export class VapourSynthScriptGenerator {
         const prepared = shaderFiles.get(filter.id)!;
         const shaderPath = prepared.file;
         filterCode += `if not hasattr(core, 'placebo'):\n    try:\n        core.std.LoadPlugin(${pyString(path.join(PATHS.PLUGINS, this.platform === 'win32' ? 'libvs_placebo.dll' : 'libvs_placebo.so').replace(/\\/g, '/'))})\n    except Exception as _shader_error:\n        raise vs.Error('Install shader support from Add filter → GLSL Shader. ' + str(_shader_error))\n`;
-        filterCode += `if clip.format.color_family == vs.RGB:\n    clip = core.resize.Point(clip, format=vs.YUV444P16, matrix_s=\"709\")\nelse:\n    clip = core.resize.Point(clip, format=vs.YUV444P16)\n`;
+        filterCode += `if clip.format.color_family == vs.RGB:\n    clip = core.resize.Point(clip, format=vs.YUV444P16, matrix_s=\"709\")\nelse:\n    clip = core.resize.Point(clip, format=clip.format.replace(sample_type=vs.INTEGER, bits_per_sample=16).id)\n`;
         filterCode += `clip = core.placebo.Shader(clip, shader=${pyString(shaderPath.replace(/\\/g, '/'))}, width=clip.width * ${filter.shader.scale}, height=clip.height * ${filter.shader.scale}, matrix=2, trc=1, linearize=${prepared.linearize ? 'True' : 'False'}, sigmoidize=${prepared.sigmoidize ? 'True' : 'False'})\n`;
         stageLabel = filter.shader.name ?? filter.preset ?? 'GLSL Shader';
       } else if (filter.filterType === 'aiModel' && filter.modelPath) {
