@@ -41,5 +41,12 @@ export function formatVapourSynthValidationError(output: string): string {
   }
   const hint = filterFailureHint(filtered);
   if (hint) return `${hint}\n\n${filtered}`;
+  // An unused incompatible plugin can log a Critical autoload notice while
+  // the script continues. Put the actual evaluation failure first, keeping
+  // startup/build diagnostics intact below it.
+  const scriptFailure = filtered.lastIndexOf('Script evaluation failed:');
+  if (scriptFailure > 0) {
+    return `${filtered.slice(scriptFailure).trim()}\n\nStartup/build output:\n${filtered.slice(0, scriptFailure).trim()}`;
+  }
   return filtered || 'VapourSynth failed before producing output. Check the log for details.';
 }

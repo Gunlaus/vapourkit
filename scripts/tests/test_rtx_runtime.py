@@ -79,6 +79,46 @@ class RtxRuntimeTests(unittest.TestCase):
         fake.core.trt_rtx.Model.assert_called_once_with([32], engine_path='rtx.engine', num_streams=2)
         fake.core.trt.Model.assert_not_called()
 
+    def test_windows_dll_spelling_survives_real_manifest_publication_and_warm_reuse(self):
+        # vspipe lowercases autoload paths; the builder's Python process keeps
+        # the user's original case. Reproduce the actual disk/JSON boundary.
+        import json
+        parent = {'platform': 'Windows', 'gpu': 'same-gpu', 'tensorrt': '1.7.1.116',
+                  'plugin': {'path': 'c:/users/mohamed/vapourkit/plugins/trt_rtx/vstrt_rtx.dll',
+                             'binarySha256': 'same-binary'}}
+        child = dict(parent, plugin=dict(parent['plugin'], path='C:/Users/Mohamed/Vapourkit/Plugins/trt_rtx/vstrt_rtx.dll'))
+        self.assertNotEqual(parent, child)
+        with tempfile.TemporaryDirectory() as d:
+            script = Path(d) / 'builder.py'; script.touch()
+            clip = types.SimpleNamespace(width=1280, height=720)
+            def publish(args, **kwargs):
+                engine = Path(next(arg.split('=', 1)[1] for arg in args if arg.startswith('--saveEngine=')))
+                engine.write_bytes(b'validated-engine')
+                manifest = {'schema': common.SCHEMA, 'runtime': child, 'engineSha256': common.digest(engine),
+                            'bindings': {'inputs': [{'shape': [1,3,-1,-1]}]}}
+                Path(str(engine) + '.json').write_text(json.dumps(manifest))
+            with patch.object(rtx, 'ensure_plugin'), patch.object(common, 'graph_contract', return_value=self.contract()), \
+                 patch.object(common, 'runtime_identity', return_value=parent), \
+                 patch.object(rtx.subprocess, 'run', side_effect=publish) as run, patch.object(common, 'raw_model', return_value='output'):
+                for _ in range(2):
+                    self.assertEqual(rtx.load_model(clip, 'm.onnx', 2, 'fp16', script, 'python', d), 'output')
+                self.assertEqual(run.call_count, 1)
+
+        self.assertEqual(rtx.cache_key(self.contract(), [1,3,720,1280], 'fp16', parent),
+                         rtx.cache_key(self.contract(), [1,3,720,1280], 'fp16', child))
+
+    def test_identity_fix_does_not_ignore_real_runtime_or_binary_changes(self):
+        identity = {'platform': 'Windows', 'gpu': 'a', 'cudaDriver': 13000, 'tensorrt': '1.7.1.116',
+                    'plugin': {'path': 'C:/Plugins/vstrt_rtx.dll', 'binarySha256': 'original'}}
+        for field, changed in [('gpu', 'b'), ('cudaDriver', 13010), ('tensorrt', 'different')]:
+            self.assertIn('runtime.' + field, rtx.metadata_rejection({'runtime': dict(identity, **{field:changed})}, identity))
+        other = dict(identity, plugin=dict(identity['plugin'], binarySha256='replaced'))
+        self.assertIn('runtime.plugin.binarySha256', rtx.metadata_rejection({'runtime':other}, identity))
+        linux = dict(identity, platform='Linux')
+        other = dict(linux, plugin=dict(linux['plugin'], path='c:/plugins/vstrt_rtx.dll'))
+        self.assertIn('runtime.plugin.path', rtx.metadata_rejection({'runtime':other}, linux))
+        self.assertIn('integrity', rtx.metadata_rejection(None, identity))
+
     def test_runtime_selector_is_explicit_and_default_stays_classic(self):
         self.assertEqual(builder.parse_args([])['runtime'], 'tensorrt')
         with self.assertRaisesRegex(ValueError, 'Unknown TensorRT runtime'):

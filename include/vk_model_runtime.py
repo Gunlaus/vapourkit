@@ -340,6 +340,24 @@ def tensor_module(backend='tensorrt'):
     raise ValueError('Unknown TensorRT runtime: ' + str(backend))
 
 
+def canonical_rtx_identity(identity):
+    """Windows autoload and explicit Python loads spell the same DLL differently.
+
+    Preserve SDK/driver/GPU versions and the plugin binary hash. Only the
+    case-insensitive Windows path is canonicalized; Linux paths stay exact.
+    This also accepts previously validated manifests with the old spelling.
+    """
+    if not isinstance(identity, dict): return identity
+    result = dict(identity)
+    plugin = identity.get('plugin')
+    if identity.get('platform') == 'Windows' and isinstance(plugin, dict):
+        import ntpath
+        result['plugin'] = dict(plugin)
+        if isinstance(plugin.get('path'), str):
+            result['plugin']['path'] = ntpath.normcase(ntpath.normpath(plugin['path']))
+    return result
+
+
 def runtime_identity(backend='tensorrt'):
     global _IDENTITY, _RTX_IDENTITY
     cached = _RTX_IDENTITY if backend == 'tensorrt-rtx' else _IDENTITY
@@ -373,6 +391,7 @@ def runtime_identity(backend='tensorrt'):
         identity['backend'] = backend
         # Explicit ABI versions govern RTX caches, not unrelated helper edits.
         identity.pop('helper', None)
+        identity = canonical_rtx_identity(identity)
         _RTX_IDENTITY = identity
     else: _IDENTITY = identity
     return identity

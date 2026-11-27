@@ -33,7 +33,7 @@ def ensure_plugin():
 
 def cache_key(contract, shape, precision, identity):
     value = {'abi': CACHE_ABI, 'spatialAbi': common.ENGINE_ABI, 'source': contract,
-             'shape': list(shape), 'precision': precision, 'runtime': identity}
+             'shape': list(shape), 'precision': precision, 'runtime': common.canonical_rtx_identity(identity)}
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
 
@@ -49,6 +49,22 @@ def build_arguments(source, engine, contract, shape, precision):
             '--maxShapes=' + dims(shape), '--builderOptimizationLevel=3']
     if precision == 'fp16': args.append('--fp16')
     return args
+
+
+def metadata_rejection(metadata, identity):
+    if not metadata:
+        return 'The engine or its manifest is missing, unreadable, or failed its integrity check.'
+    actual = common.canonical_rtx_identity(metadata.get('runtime'))
+    expected = common.canonical_rtx_identity(identity)
+    if actual == expected: return None
+    def differences(left, right, prefix='runtime'):
+        if isinstance(left, dict) and isinstance(right, dict):
+            result = []
+            for key in sorted(set(left) | set(right)):
+                result.extend(differences(left.get(key), right.get(key), prefix + '.' + key))
+            return result
+        return [] if left == right else [prefix]
+    return 'Runtime identity differs in: ' + ', '.join(differences(actual, expected)) + '.'
 
 
 def load_model(clips, source, streams, precision, builder, python, cache, use_cuda_graph=True):
@@ -76,7 +92,8 @@ def load_model(clips, source, streams, precision, builder, python, cache, use_cu
     # Separate from the child builder's engine lock: never wait on ourselves.
     with common.engine_build_lock(str(engine) + '.loader'):
         metadata = common.engine_metadata(engine)
-        if not metadata or metadata.get('runtime') != identity:
+        rejection = metadata_rejection(metadata, identity)
+        if rejection:
             if not Path(builder).is_file(): raise RuntimeError('The bundled engine builder is missing. Extract a complete Vapourkit build.')
             print('[vk-rtx] Building a separate validated RTX engine for this model and input size.', file=sys.stderr, flush=True)
             args = [str(python), '-u', str(builder), *build_arguments(source, engine, contract, shape, precision)]
@@ -84,8 +101,10 @@ def load_model(clips, source, streams, precision, builder, python, cache, use_cu
             subprocess.run(args, check=True, timeout=1800, stdin=subprocess.DEVNULL,
                            stdout=sys.stderr, stderr=sys.stderr)
             metadata = common.engine_metadata(engine)
-            if not metadata or metadata.get('runtime') != identity:
-                raise RuntimeError('The RTX builder did not publish a matching validated engine.')
+            rejection = metadata_rejection(metadata, identity)
+            if rejection:
+                raise RuntimeError('The RTX builder completed, but the loader rejected its engine. ' + rejection +
+                                   ' Keep the engine .json and .validation-report.json files when reporting this error.')
         else:
             print('[vk-rtx] Reusing validated engine: ' + engine.name, file=sys.stderr, flush=True)
     return common.raw_model(clips, engine, streams, metadata['bindings'], use_cuda_graph, backend='tensorrt-rtx')

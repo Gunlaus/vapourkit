@@ -1153,7 +1153,8 @@ def _configure_builder(builder, network, opts, trt, average_timing_iterations, t
     _configure_shape_profile(builder, network, config, opts)
 
     timing_cache = None
-    if timing_cache_bytes is not None:
+    # RTX exposes deprecated no-op timing-cache APIs; its JIT manages tactics.
+    if timing_cache_bytes is not None and opts.get('runtime') != 'tensorrt-rtx':
         timing_cache = config.create_timing_cache(timing_cache_bytes)
         config.set_timing_cache(timing_cache, ignore_mismatch=False)
 

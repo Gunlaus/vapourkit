@@ -58,3 +58,13 @@ describe('formatVapourSynthValidationError', () => {
     );
   });
 });
+
+
+it('prioritizes the script exception over an unrelated API4 plugin autoload failure', () => {
+  const startup = 'Critical: Core only supports API R4.2 but the loaded plugin requires API R4.3; Name: Hysteresis filter.';
+  const failure = 'Script evaluation failed:\nPython exception: The RTX builder did not publish a matching validated engine.';
+  const result = formatVapourSynthValidationError(`${startup}\n[vk-build] progress 100\n${failure}`);
+  expect(result.startsWith(failure)).toBe(true);
+  expect(result).toContain(startup);
+  expect(result).toContain('[vk-build] progress 100');
+});
