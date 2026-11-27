@@ -34,6 +34,12 @@ describe('source metadata reuse', () => {
     await cachedSourceProbe(source, '/ffmpeg', load); await cachedSourceProbe(source, '/ffmpeg', load);
     expect(load).toHaveBeenCalledTimes(2);
   });
+  it('does not cache an FFmpeg error parsed without any video stream', async () => {
+    const source = await file('unreadable-video');
+    const load = vi.fn(async (): Promise<VideoProbe> => ({ ...value(), display: {} }));
+    await cachedSourceProbe(source, '/ffmpeg', load); await cachedSourceProbe(source, '/ffmpeg', load);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
   it('expires metadata and bounds the number of retained entries', async () => {
     const source = await file('expired'); const load = vi.fn(async () => value());
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1000000);

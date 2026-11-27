@@ -114,11 +114,11 @@ export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
   ffmpegArgs.push('-map', '0:v:0');
   const height = Math.max(180, Math.min(1080, Math.floor((input.previewHeight ?? 720) / 2) * 2));
   const previewFps = Math.max(0.1, Math.min(5, input.previewFps ?? 1));
-  // Sample by wall time, before scaling/JPEG encoding. Media-time sampling
-  // generates many throwaway previews when a render runs faster than playback.
+  // Bound both wall and media time before scaling/JPEG encoding: fast renders
+  // avoid throwaway previews, while slow renders retain their original cadence.
   // Keep the timestamp changes scoped to this preview output.
   const interval = 1 / previewFps;
-  ffmpegArgs.push('-vf', `select='if(gte(abs(time(0)-ld(0)),${interval}),st(0,time(0))*0+1,0)',scale=-2:${height}`);
+  ffmpegArgs.push('-vf', `select='if(gte(abs(time(0)-ld(0)),${interval})*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,${interval})),st(0,time(0))*0+1,0)',scale=-2:${height}`);
   ffmpegArgs.push('-fps_mode:v:0', 'vfr');
   ffmpegArgs.push('-f', 'image2pipe');
   ffmpegArgs.push('-c:v', 'mjpeg');

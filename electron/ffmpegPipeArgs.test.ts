@@ -90,14 +90,14 @@ describe('the ffmpeg encode', () => {
     expect(valueOf(args, '-movflags')).toBe('+faststart');
     expect(args.slice(args.indexOf('C:/out.mp4') - 1)).toEqual([
       '-y', 'C:/out.mp4',
-      '-map', '0:v:0', '-vf', "select='if(gte(abs(time(0)-ld(0)),1),st(0,time(0))*0+1,0)',scale=-2:720", '-fps_mode:v:0', 'vfr', '-f', 'image2pipe', '-c:v', 'mjpeg', '-pix_fmt', 'yuvj422p', '-q:v', '1', 'pipe:1',
+      '-map', '0:v:0', '-vf', "select='if(gte(abs(time(0)-ld(0)),1)*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,1)),st(0,time(0))*0+1,0)',scale=-2:720", '-fps_mode:v:0', 'vfr', '-f', 'image2pipe', '-c:v', 'mjpeg', '-pix_fmt', 'yuvj422p', '-q:v', '1', 'pipe:1',
     ]);
   });
 
   it('changes only the preview output when preview speed changes', () => {
     const args = build({ previewFps: 5, previewHeight: 360 });
     expect(args.slice(0, args.indexOf('C:/out.mp4') + 1)).toEqual(build().slice(0, build().indexOf('C:/out.mp4') + 1));
-    expect(args.join(' ')).toContain("select='if(gte(abs(time(0)-ld(0)),0.2),st(0,time(0))*0+1,0)',scale=-2:360");
+    expect(args.join(' ')).toContain("select='if(gte(abs(time(0)-ld(0)),0.2)*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,0.2)),st(0,time(0))*0+1,0)',scale=-2:360");
     const without = build({ previewEnabled: false });
     expect(without).not.toContain('image2pipe');
     expect(without[without.length - 1]).toBe('C:/out.mp4');

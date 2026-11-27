@@ -42,4 +42,20 @@ describe.skipIf(process.env.VK_MEDIA_TESTS !== '1')('real encoding-preview isola
     }
     expect(hashes[0]).toBe(hashes[1]);
   }, 45000);
+  it('does not increase preview work on a slower-than-realtime render', () => {
+    const args = buildPipeFFmpegArgs({ inputPath: source, outputPath: join(dir, 'slow.mkv'),
+      metadata: { hasAudio: false, hasSubtitles: false, dar: null, duration: 4, startTime: 0, audioStreams: 0, subtitleStreams: 0 },
+      outputInfo: { frames: 96, resolution: '160x90', fps: 24, fpsString: '24/1', pixelFormat: 'YUV420P8' },
+      ffmpegConfig: { videoArgs: ['-c:v', 'libx264', '-preset', 'ultrafast', '-threads:v', '1'] },
+      audioTrim: { start: null, duration: null, exact: true }, previewHeight: 180, previewFps: 1,
+    });
+    // Four seconds of media takes eight wall seconds. A wall-only sampler
+    // would increase the number of JPEGs compared with the old 1/media-second path.
+    args.splice(args.indexOf('pipe:0') - 1, 0, '-readrate', '0.5');
+    const result = spawnSync('ffmpeg', args, { input: readFileSync(source), timeout: 20000, maxBuffer: 10 * 1024 * 1024 });
+    expect(result.status, result.stderr.toString()).toBe(0);
+    let frames = 0;
+    for (let i = 0; i < result.stdout.length - 2; i++) if (result.stdout[i] === 255 && result.stdout[i + 1] === 216 && result.stdout[i + 2] === 255) frames++;
+    expect(frames).toBe(4);
+  }, 25000);
 });

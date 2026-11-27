@@ -32,7 +32,7 @@ export async function cachedSourceProbe(file: string, executable: string, load: 
       const after = await fs.stat(file);
       changed = signature !== `${after.size}:${after.mtimeMs}:${after.ctimeMs}`;
     } catch { /* Do not cache a source that disappeared during the probe. */ }
-    if ((!value.streams || changed) && entries.get(key) === entry) entries.delete(key);
+    if ((!value.streams || !value.display.codec || changed) && entries.get(key) === entry) entries.delete(key);
     return structuredClone(value);
   } catch (error) {
     if (entries.get(key) === entry) entries.delete(key);
