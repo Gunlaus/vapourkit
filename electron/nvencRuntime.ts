@@ -13,7 +13,7 @@ export const NVENC_ASSETS = [
   { name: 'NVEncC_9.41_x64.7z', url: 'https://github.com/rigaya/NVEnc/releases/download/9.41/NVEncC_9.41_x64.7z', size: 284319314, sha256: '718ce2084d45e56706149bb9cf5d96a5ea697c4c5f75a2f256ebf79918259da2' },
   { name: 'nvenc_vpp_onnx_dlls_20260627.7z', url: 'https://github.com/rigaya/HWEnc-onnx-models/releases/download/20260627/nvenc_vpp_onnx_dlls_20260627.7z', size: 1872359145, sha256: 'ebdfdc855c45e9bee070fa0a79c9240f5477f5dc3bc94e4730dfb7cd4065b144' },
 ] as const;
-const REQUIRED = ['NVEncC64.exe', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll', 'onnxruntime_providers_tensorrt.dll', 'nvinfer_10.dll'];
+const REQUIRED = ['NVEncC64.exe', 'libplacebo-360.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll', 'onnxruntime_providers_tensorrt.dll', 'nvinfer_10.dll'];
 let status = { busy: false, progress: 0, message: '' };
 let inUse = 0;
 const root = () => path.join(PATHS.APP_DATA, 'nvencc', NVENC_VERSION);

@@ -119,3 +119,15 @@ it('renders a shader without starting the Python model builder and verifies the 
   expect(precision).not.toHaveBeenCalled(); expect(modelType).not.toHaveBeenCalled();
   expect(control.spawn.mock.calls.map(call => call[0])).toEqual(['/ffprobe', path.join(root, 'nvencc', '9.41', 'NVEncC64.exe'), '/ffprobe']);
 });
+
+
+it('checks source compatibility without starting an encode and keeps the source probe reusable', async () => {
+  const exec = new NvencExecutor(null, '/python', 'win32');
+  expect(await exec.supportsShaderSource(input)).toBe(true);
+  expect(control.spawn.mock.calls.map(call => call[0])).toEqual(['/ffprobe']);
+  const original = streams[0].pix_fmt;
+  try {
+    streams[0].pix_fmt = 'yuv444p';
+    expect(await new NvencExecutor(null, '/python', 'win32').supportsShaderSource(input)).toBe(false);
+  } finally { streams[0].pix_fmt = original; }
+});

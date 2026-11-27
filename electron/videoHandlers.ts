@@ -353,13 +353,14 @@ export function registerVideoHandlers(
       const pythonPath = dependencyManager.getPythonExecutablePath();
       const nativeRequest = { inputPath: videoPath, outputPath, filters: filters ?? [], defaultBackend, encoding: configManager.getEncodingSettings(), processingFormat: configManager.getProcessingFormat(), colorimetry: configManager.getColorimetrySettings(), segment, benchmark: benchmarkMode };
       const nativeRequested = useNativeShaders(nativeRequest, (await nvencRuntimeStatus()).installed);
-      const executor = nativeRequested ? new NvencExecutor(mainWindow, pythonPath) : new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
+      let executor = nativeRequested ? new NvencExecutor(mainWindow, pythonPath) : new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
 
       // The job is in the slot from here on, so a cancel at any later await
       // reaches it. Any previous run, and any validation, is stopped first.
       infoJob.stop();
+      const context = { executor, log: itemLogger };
       const job = upscaleJob.start(
-        { executor, log: itemLogger },
+        context,
         { mode: 'kill', note: 'Processing stopped: a new run started' },
       );
 
@@ -400,6 +401,12 @@ export function registerVideoHandlers(
       
       let temporaryScript: string | null = null;
       try {
+        if (executor instanceof NvencExecutor && !await executor.supportsShaderSource(videoPath)) {
+          if (executor.isStopped) return { success: false, error: 'Canceled' };
+          executor = new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
+          context.executor = executor;
+          qlog('Shader processing: standard pipeline selected for source compatibility.');
+        }
         executor.onDiagnostic = message => itemLogger.write(message);
         if (executor instanceof NvencExecutor) {
           qlog('Execution backend: NVEncC GPU (experimental)');

@@ -89,6 +89,20 @@ export class NvencExecutor {
     throw new Error('NVEncC needs the original ONNX beside this engine. Restore/reimport its model package; existing TensorRT engine files cannot be reused by this backend.');
   }
 
+  private checkedSource: { file: string; probe: NativeProbe } | null = null;
+  /** Check metadata while this executor is in the cancellable job slot. */
+  async supportsShaderSource(file: string): Promise<boolean> {
+    const probe = await this.probe(file);
+    this.check();
+    try { sourceVideo(probe, true); }
+    catch { return false; }
+    const video = probe.streams.find(s => s.codec_type === 'video')!;
+    // Consumer NVDEC does not decode 10-bit H.264; the standard path can.
+    if (video.codec_name === 'h264' && video.pix_fmt === 'yuv420p10le') return false;
+    this.checkedSource = { file, probe };
+    return true;
+  }
+
   async execute(request: NvencRequest, useFp32: (file: string) => boolean, modelType: (file: string) => string): Promise<void> {
     if (this.platform !== 'win32') throw new Error('This NVEncC test backend currently supports Windows x64. Select VapourSynth execution.');
     const filter = nativeProcessingFilter(request);
@@ -106,7 +120,7 @@ export class NvencExecutor {
       this.check();
       if (await fs.pathExists(request.outputPath)) throw new Error('The output file already exists. Choose a new filename; the NVEncC test backend never overwrites an existing video.');
       await fs.ensureDir(path.dirname(request.outputPath));
-      const source = await this.probe(request.inputPath);
+      const source = this.checkedSource?.file === request.inputPath ? this.checkedSource.probe : await this.probe(request.inputPath);
       const video = sourceVideo(source, isShader);
       const rate = (video.avg_frame_rate ?? '').split('/').map(Number);
       const averageFps = rate.length === 2 && rate[1] ? rate[0] / rate[1] : 0;

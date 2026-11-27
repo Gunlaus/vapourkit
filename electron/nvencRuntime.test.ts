@@ -33,7 +33,7 @@ vi.mock('./download', () => ({ downloadToFile: async (url: string, destination: 
 } }));
 vi.mock('./archive', () => ({ extract7z: async (archive: string, dir: string) => {
   const nested = path.join(dir, 'upstream-package'); await fs.ensureDir(nested);
-  const names = archive.includes('onnx_dlls') ? ['onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll', 'onnxruntime_providers_tensorrt.dll', 'nvinfer_10.dll'] : ['NVEncC64.exe'];
+  const names = archive.includes('onnx_dlls') ? ['onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'onnxruntime_providers_cuda.dll', 'onnxruntime_providers_tensorrt.dll', 'nvinfer_10.dll'] : ['NVEncC64.exe', 'libplacebo-360.dll'];
   for (const name of names) await fs.writeFile(path.join(nested, name), 'verified fixture');
 } }));
 import { acquireNvencRuntime, clearNvencEngineCache, installNvencRuntime, nvencRuntimeStatus, NVENC_ASSETS } from './nvencRuntime';
