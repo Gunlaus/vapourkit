@@ -71,7 +71,7 @@ export async function installCatalogModel(id: string, version: string, experimen
     const installed = await importModelPackage(source,PATHS.MODELS,name);
     if (!existed) createdPackage = destination;
     const contract = await fs.readJson(installed + '.contract.json');
-    await fs.writeJson(installed + '.contract.json',{ ...contract, spatialMultiple: entry.model.spatialMultiple, paddingMode: entry.model.paddingMode ?? 'reflect', scale: entry.model.scale, catalog: entry.id + '@' + entry.version, semantics: 'catalog' });
+    await fs.writeJson(installed + '.contract.json',{ ...contract, spatialMultiple: entry.model.spatialMultiple, paddingMode: entry.model.paddingMode ?? contract.paddingMode, scale: entry.model.scale, catalog: entry.id + '@' + entry.version, semantics: 'catalog' });
     const key = modelMetadataKey(installed,PATHS.MODELS);
     if (!configManager.getModelMetadata(key)) {
       createdMetadata = key;
