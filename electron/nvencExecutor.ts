@@ -128,9 +128,13 @@ export class NvencExecutor {
         if (selected?.cuda === null || selected?.cuda === undefined) throw new Error('The selected GPU has no CUDA device. Select an NVIDIA GPU or use VapourSynth execution.');
         device = selected.cuda;
       }
-      const args = nvencArgs(request, source, prepared.model, path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache'), useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
-      await fs.ensureDir(path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache'));
       const executable = nvencExecutable();
+      // command() runs in the executable directory. Both caches and runtime are
+      // under data/nvencc, so a relative path omits arbitrary install-directory
+      // characters that NVEncC's comma-delimited filter parser cannot escape.
+      const modelArgument = path.relative(path.dirname(executable), prepared.model);
+      const args = nvencArgs(request, source, modelArgument, path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache'), useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
+      await fs.ensureDir(path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache'));
       const env = { ...process.env, PATH: path.dirname(executable) + path.delimiter + (process.env.PATH ?? '') };
       // Preserve user-supplied device masks. Both enumeration and NVEncC use
       // this same environment, so the CUDA ordinals stay consistent.

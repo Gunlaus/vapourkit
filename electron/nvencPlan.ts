@@ -53,17 +53,15 @@ export function nvencArgs(request: NvencRequest, probe: NativeProbe, modelPath: 
   const inputMatrix = request.colorimetry?.overwriteMatrix
     ? request.colorimetry.matrix709 ? 'bt709' : 'smpte170m'
     : ({ bt709: 'bt709', smpte170m: 'smpte170m', bt470bg: 'bt470bg' }[video.color_space ?? ''] ?? matrix);
-  // The comma-delimited filter parameter has its own quoting, separate from argv.
-  const quote = (value: string) => {
-    if (/["\r\n]/.test(value)) throw new Error('NVEncC model/cache paths cannot contain quotes or newlines.');
-    return `"${value}"`;
-  };
+  // NVEncC 9.41 splits this argument on commas and assigns model= literally.
+  // It does not unquote values. spawn() handles spaces in the complete argv item.
+  if (/[,"\r\n]/.test(modelPath)) throw new Error('NVEncC model filter paths cannot contain commas, quotes or newlines. Use the relative prepared-model cache path.');
   const args = ['--avhw', '--device', String(device), '-i', request.inputPath, '-o', outputPath,
     '--codec', simple.codec === 'h265' ? 'hevc' : simple.codec, '--preset', simple.preset.toLowerCase(),
     '--tune', 'hq', '--multipass', 'none', '--lookahead', '0',
     '--output-depth', request.processingFormat === 'vs.YUV420P10' ? '10' : '8',
     '--avsync', 'vfr', '--colormatrix', 'bt709', '--colorprim', 'bt709', '--transfer', 'bt709', '--colorrange', 'limited',
-    '--vpp-onnx', `model=${quote(modelPath)},provider=tensorrt,prec=${precision},colormatrix=${inputMatrix},colormatrix_out=bt709,colorrange=${video.color_range === 'pc' ? 'full' : 'limited'},frames=1`,
+    '--vpp-onnx', `model=${modelPath},provider=tensorrt,prec=${precision},colormatrix=${inputMatrix},colormatrix_out=bt709,colorrange=${video.color_range === 'pc' ? 'full' : 'limited'},frames=1`,
     '--vpp-onnx-cache-dir', cachePath, '--log-level', 'info'];
   if (simple.rateControl === 'bitrate') args.push('--vbr', String(Math.round((simple.bitrateMbps ?? 8) * 1000)));
   else args.push('--qvbr', String(simple.quality));

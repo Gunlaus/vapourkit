@@ -11,7 +11,7 @@ const source: NativeProbe = { streams: [
   { codec_type: 'audio', codec_name: 'aac' }, { codec_type: 'audio', codec_name: 'flac' },
   { codec_type: 'subtitle', codec_name: 'ass' }, { codec_type: 'subtitle', codec_name: 'subrip' }, { codec_type: 'attachment', codec_name: 'ttf' },
 ] };
-const build = (r = request(), output = 'D:/stage.mkv') => nvencArgs(r, source, 'D:/model dir,one/model.onnx', 'D:/cache', 'fp16', output, 2);
+const build = (r = request(), output = 'D:/stage.mkv') => nvencArgs(r, source, 'D:/model dir/model.onnx', 'D:/cache', 'fp16', output, 2);
 const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 
 describe('native GPU plan eligibility', () => {
@@ -45,7 +45,7 @@ describe('native command settings', () => {
     expect(value(args, '--device')).toBe('2'); expect(value(args, '--codec')).toBe('av1');
     expect(value(args, '--preset')).toBe('p6'); expect(value(args, '--qvbr')).toBe('25');
     expect(value(args, '--output-depth')).toBe('8'); expect(value(args, '--avsync')).toBe('vfr');
-    expect(value(args, '--vpp-onnx')).toContain('model="D:/model dir,one/model.onnx",provider=tensorrt,prec=fp16');
+    expect(value(args, '--vpp-onnx')).toContain('model=D:/model dir/model.onnx,provider=tensorrt,prec=fp16');
     expect(value(args, '--vpp-onnx')).toContain('colormatrix_out=bt709');
   });
   it('maps bitrate and keyframe controls without inventing defaults', () => {
@@ -76,8 +76,17 @@ describe('native command settings', () => {
     const r = request(); r.encoding.subtitleTracks = [];
     expect(build(r, 'D:/stage.mp4')).toContain('D:/stage.mp4');
   });
-  it('rejects unrepresentable filter paths', () => {
-    expect(() => nvencArgs(request(), source, 'bad"path.onnx', '/cache', 'fp32', '/stage.mkv')).toThrow(/quotes/);
+  it.each(['bad"path.onnx', 'bad,path.onnx', 'bad\npath.onnx'])('rejects unrepresentable filter paths %j', model => {
+    expect(() => nvencArgs(request(), source, model, '/cache', 'fp32', '/stage.mkv')).toThrow(/commas, quotes or newlines/);
+  });
+  it.each(['D:\\model dir\\日本語\\model.onnx', '../model-cache/abc/model.onnx'])('survives the pinned NVEncC literal model parser: %s', model => {
+    const args = nvencArgs(request(), source, model, '/cache', 'fp16', '/stage.mkv');
+    // rgy_cmd.cpp at NVEnc 9.41: split(strInput[i], ","), then substr(pos + 1).
+    const parsed = Object.fromEntries(value(args, '--vpp-onnx').split(',').map(item => {
+      const equal = item.indexOf('='); return [item.slice(0, equal), item.slice(equal + 1)];
+    }));
+    expect(parsed.model).toBe(model);
+    expect(parsed.provider).toBe('tensorrt');
   });
 });
 

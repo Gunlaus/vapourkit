@@ -12,18 +12,18 @@ vi.mock('child_process', () => ({ spawn: (...args: unknown[]) => control.spawn(.
 vi.mock('electron', () => ({ app: { getAppPath: () => process.cwd() } }));
 vi.mock('./constants', async () => {
   const os = await import('os'), path = await import('path');
-  return { PATHS: { APP_DATA: path.join(os.tmpdir(), `vk-native-executor-${process.pid}`) } };
+  return { PATHS: { APP_DATA: path.join(os.tmpdir(), `vk-native executor, ${process.pid}`) } };
 });
 vi.mock('./logger', () => ({ logger: { upscale: vi.fn() } }));
 vi.mock('./ffmpegManager', () => ({ FFmpegManager: { getFFprobePath: () => '/ffprobe' } }));
 vi.mock('./gpuSelection', () => ({ getGpuChoice: () => undefined, findChosenGpu: vi.fn() }));
 vi.mock('./utils', () => ({ fixAsarPath: (p: string) => p, setupVSEnvironment: () => ({}) }));
-vi.mock('./nvencRuntime', () => ({ acquireNvencRuntime: async () => control.release, nvencExecutable: () => '/nvencc' }));
+vi.mock('./nvencRuntime', () => ({ acquireNvencRuntime: async () => control.release, nvencExecutable: () => path.join(root, 'nvencc', '9.41', 'NVEncC64.exe') }));
 vi.mock('./processLifecycle', () => ({ createWorkloadSpawnOptions: (o: unknown) => o,
   terminateProcessTree: (proc: EventEmitter) => setImmediate(() => proc.emit('close', 1)),
 }));
 import { NvencExecutor, parseNativeProgress } from './nvencExecutor';
-const root = path.join(os.tmpdir(), `vk-native-executor-${process.pid}`);
+const root = path.join(os.tmpdir(), `vk-native executor, ${process.pid}`);
 const input = path.join(root, 'input.mkv'), output = path.join(root, 'output.mkv'), model = path.join(root, 'model.onnx');
 const streams = [{ codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, pix_fmt: 'yuv420p', field_order: 'progressive', nb_frames: '240' },
   { codec_type: 'audio', codec_name: 'aac' }, { codec_type: 'subtitle', codec_name: 'ass' }, { codec_type: 'attachment', codec_name: 'ttf' }];
@@ -33,10 +33,15 @@ function request(): NvencRequest { return { inputPath: input, outputPath: output
 beforeEach(async () => {
   await fs.remove(root); await fs.ensureDir(root); await fs.writeFile(input, 'source'); await fs.writeFile(model, 'model');
   control.release.mockClear(); control.spawn.mockReset(); control.hold = ''; control.missingTracks = false;
-  control.spawn.mockImplementation((exe: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+  control.spawn.mockImplementation((exe: string, args: string[], opts: { env: NodeJS.ProcessEnv; cwd: string }) => {
     const proc = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), pid: 12345 });
-    const phase = exe === '/ffprobe' ? 'probe' : exe === '/nvencc' ? 'encode' : 'prepare';
-    if (phase === 'encode') { fs.writeFileSync(args[args.indexOf('-o') + 1], 'encoded'); control.env = opts.env; }
+    const phase = exe === '/ffprobe' ? 'probe' : exe.endsWith('NVEncC64.exe') ? 'encode' : 'prepare';
+    if (phase === 'encode') {
+      // Reproduce NVEncC 9.41's literal comma-delimited parser and filesystem lookup.
+      const modelValue = args[args.indexOf('--vpp-onnx') + 1].split(',').find(p => p.startsWith('model='))!.slice(6);
+      expect(path.isAbsolute(modelValue)).toBe(false);
+      expect(fs.existsSync(path.resolve(opts.cwd, modelValue))).toBe(true);
+      fs.writeFileSync(args[args.indexOf('-o') + 1], 'encoded'); control.env = opts.env; }
     setImmediate(() => {
       if (control.hold === phase) return;
       if (phase === 'probe') {
@@ -58,7 +63,7 @@ describe('NVEncC native lifecycle', () => {
     const executor = new NvencExecutor(window, '/python', 'win32'); const log = vi.fn(); executor.onDiagnostic = log;
     await executor.execute(request(), () => false, () => 'image');
     expect(await fs.readFile(output, 'utf8')).toBe('encoded');
-    expect(control.spawn.mock.calls.some(c => c[0] === '/nvencc')).toBe(true);
+    expect(control.spawn.mock.calls.some(c => c[0].endsWith('NVEncC64.exe'))).toBe(true);
     expect(control.spawn.mock.calls.some(c => c[0].includes('vspipe'))).toBe(false);
     expect(send.mock.calls.some(c => c[0] === 'upscale-progress' && c[1].type === 'complete')).toBe(true);
     expect(log.mock.calls.some(c => c[0].includes('"gpuTensorSharingConfirmed":true'))).toBe(true);
@@ -69,7 +74,7 @@ describe('NVEncC native lifecycle', () => {
     const executor = new NvencExecutor(null, '/python', 'win32');
     const run = executor.execute(request(), () => false, () => 'image');
     const assertion = expect(run).rejects.toThrow('Canceled');
-    await vi.waitFor(() => expect(control.spawn.mock.calls.some(c => phase === 'probe' ? c[0] === '/ffprobe' : phase === 'prepare' ? c[0] === '/python' : c[0] === '/nvencc')).toBe(true));
+    await vi.waitFor(() => expect(control.spawn.mock.calls.some(c => phase === 'probe' ? c[0] === '/ffprobe' : phase === 'prepare' ? c[0] === '/python' : c[0].endsWith('NVEncC64.exe'))).toBe(true));
     executor.cancel(); await assertion;
     expect(await fs.pathExists(output)).toBe(false);
     expect((await fs.readdir(root)).some(n => n.includes('.nvencc-'))).toBe(false);
