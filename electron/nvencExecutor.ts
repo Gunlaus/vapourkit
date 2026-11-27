@@ -1,3 +1,4 @@
+import { prepareShader } from './shaders';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -15,7 +16,7 @@ import { LineSplitter } from './lineSplitter';
 import { ReportedRunError } from './errorMessageHandler';
 import type { UpscaleProgress } from './upscaleExecutor';
 import { acquireNvencRuntime, nvencExecutable } from './nvencRuntime';
-import { nativeModelFilter, nvencArgs, selectedOrdinals, sourceVideo, verifyNativeOutput, type NativeProbe, type NvencRequest } from './nvencPlan';
+import { nativeProcessingFilter, nvencArgs, selectedOrdinals, sourceVideo, verifyNativeOutput, type NativeProbe, type NvencRequest } from './nvencPlan';
 
 export interface NativeProgress { frames: number; fps: number; percentage: number | null }
 export function parseNativeProgress(line: string): NativeProgress | null {
@@ -90,8 +91,9 @@ export class NvencExecutor {
 
   async execute(request: NvencRequest, useFp32: (file: string) => boolean, modelType: (file: string) => string): Promise<void> {
     if (this.platform !== 'win32') throw new Error('This NVEncC test backend currently supports Windows x64. Select VapourSynth execution.');
-    const filter = nativeModelFilter(request);
-    if (modelType(filter.modelPath!) !== 'image') throw new Error('NVEncC currently supports image models. Select VapourSynth execution for temporal models.');
+    const filter = nativeProcessingFilter(request);
+    const isShader = filter.filterType === 'shader';
+    if (!isShader && modelType(filter.modelPath!) !== 'image') throw new Error('NVEncC currently supports image models. Select VapourSynth execution for temporal models.');
     const release = await acquireNvencRuntime();
     const extension = path.extname(request.outputPath);
     const stage = path.join(path.dirname(request.outputPath), `.${path.basename(request.outputPath, extension)}.nvencc-${randomUUID()}${extension}`);
@@ -105,19 +107,36 @@ export class NvencExecutor {
       if (await fs.pathExists(request.outputPath)) throw new Error('The output file already exists. Choose a new filename; the NVEncC test backend never overwrites an existing video.');
       await fs.ensureDir(path.dirname(request.outputPath));
       const source = await this.probe(request.inputPath);
-      const video = sourceVideo(source);
+      const video = sourceVideo(source, isShader);
       const rate = (video.avg_frame_rate ?? '').split('/').map(Number);
       const averageFps = rate.length === 2 && rate[1] ? rate[0] / rate[1] : 0;
       planned = Number(video.nb_frames) || Math.round(Number(source.format?.duration ?? video.duration) * averageFps) || 0;
       this.send({ type: 'progress', currentFrame: 0, totalFrames: planned, fps: 0, percentage: 0, message: 'Preparing NVEncC GPU backend…' });
-      const sourcePath = await this.sourceModel(filter.modelPath!);
-      const cache = path.join(PATHS.APP_DATA, 'nvencc', 'model-cache');
-      const adapter = fixAsarPath(path.join(app.getAppPath(), 'include', 'prepare_nvencc_model.py'));
-      this.log('[nvencc] Preparing a cached model adapter; the original model and engine remain untouched.');
-      const prepared = JSON.parse(await this.command(this.python, ['-I', adapter, '--source', sourcePath, '--cache', cache, '--contract-cache', path.join(PATHS.APP_DATA, 'model-contracts')], setupVSEnvironment(this.python), undefined, 300000)) as { model: string; engineIdentity?: string; inputShape: Array<string | number>; outputShape: Array<string | number> };
-      for (const [index, actual] of [[2, video.height!], [3, video.width!]]) {
-        const expected = prepared.inputShape[index];
-        if (typeof expected === 'number' && expected > 0 && expected !== actual) throw new Error(`This ONNX model requires ${prepared.inputShape[3]}x${prepared.inputShape[2]} input; this source is ${video.width}x${video.height}. Choose a dynamic model or VapourSynth execution.`);
+      let resourcePath: string;
+      let label: string;
+      let engineIdentity = '';
+      if (isShader) {
+        const runtimeFiles = await fs.readdir(path.dirname(nvencExecutable()));
+        if (!runtimeFiles.some(name => /^libplacebo.*\.dll$/i.test(name))) {
+          throw new Error('The NVEncC libplacebo runtime is missing. Repair the NVEncC backend in Settings → Processing.');
+        }
+        const prepared = await prepareShader(filter.shader!);
+        resourcePath = prepared.file;
+        label = prepared.info.name;
+        this.log('[nvencc] GLSL shader processing through libplacebo; no AI model or TensorRT engine build is required. The GPU driver compiles the shader on use.');
+      } else {
+        const sourcePath = await this.sourceModel(filter.modelPath!);
+        const cache = path.join(PATHS.APP_DATA, 'nvencc', 'model-cache');
+        const adapter = fixAsarPath(path.join(app.getAppPath(), 'include', 'prepare_nvencc_model.py'));
+        this.log('[nvencc] Preparing a cached model adapter; the original model and engine remain untouched.');
+        const prepared = JSON.parse(await this.command(this.python, ['-I', adapter, '--source', sourcePath, '--cache', cache, '--contract-cache', path.join(PATHS.APP_DATA, 'model-contracts')], setupVSEnvironment(this.python), undefined, 300000)) as { model: string; engineIdentity?: string; inputShape: Array<string | number>; outputShape: Array<string | number> };
+        for (const [index, actual] of [[2, video.height!], [3, video.width!]]) {
+          const expected = prepared.inputShape[index];
+          if (typeof expected === 'number' && expected > 0 && expected !== actual) throw new Error(`This ONNX model requires ${prepared.inputShape[3]}x${prepared.inputShape[2]} input; this source is ${video.width}x${video.height}. Choose a dynamic model or VapourSynth execution.`);
+        }
+        resourcePath = prepared.model;
+        label = path.basename(sourcePath);
+        engineIdentity = prepared.engineIdentity ?? path.basename(path.dirname(prepared.model));
       }
       let device = 0;
       const choice = getGpuChoice();
@@ -132,16 +151,16 @@ export class NvencExecutor {
       // command() runs in the executable directory. Both caches and runtime are
       // under data/nvencc, so a relative path omits arbitrary install-directory
       // characters that NVEncC's comma-delimited filter parser cannot escape.
-      const modelArgument = path.relative(path.dirname(executable), prepared.model);
+      const modelArgument = path.relative(path.dirname(executable), resourcePath);
       // NVEncC fingerprints model.onnx itself, not its external weights.bin.
       // Namespace its cache by the complete prepared source identity as well.
-      const engineCache = path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache', prepared.engineIdentity ?? path.basename(path.dirname(prepared.model)));
-      const args = nvencArgs(request, source, modelArgument, engineCache, useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
-      await fs.ensureDir(engineCache);
+      const engineCache = path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache', engineIdentity);
+      const args = nvencArgs(request, source, modelArgument, engineCache, !isShader && useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
+      if (!isShader) await fs.ensureDir(engineCache);
       const env = { ...process.env, PATH: path.dirname(executable) + path.delimiter + (process.env.PATH ?? '') };
       // Preserve user-supplied device masks. Both enumeration and NVEncC use
       // this same environment, so the CUDA ordinals stay consistent.
-      this.log('[nvencc] First use builds a separate engine cache. Live encoding preview is unavailable; dedicated preview still uses VapourSynth.');
+      this.log(isShader ? '[nvencc] Shader preview is not available in this first version. Encode a short source clip to compare the result.' : '[nvencc] First use builds a separate engine cache. Live encoding preview is unavailable; dedicated preview still uses VapourSynth.');
       this.log('[nvencc] Command: ' + JSON.stringify([executable, ...args]));
       setupMs = Date.now() - started;
       const nativeStarted = Date.now();
@@ -156,9 +175,9 @@ export class NvencExecutor {
           if (buildStatus) { this.window?.webContents.send('engine-build-progress', { status: 'idle' }); buildStatus = false; }
         } else {
           this.log('[nvencc] ' + line);
-          if (!buildStatus && /(?:building|build).*engine|engine.*(?:building|build)/i.test(line)) {
+          if (!isShader && !buildStatus && /(?:building|build).*engine|engine.*(?:building|build)/i.test(line)) {
             buildStatus = true;
-            this.window?.webContents.send('engine-build-progress', { status: 'building', label: path.basename(sourcePath), message: 'NVEncC is preparing its TensorRT engine cache.' });
+            this.window?.webContents.send('engine-build-progress', { status: 'building', label, message: 'NVEncC is preparing its TensorRT engine cache.' });
           }
         }
       });
@@ -175,9 +194,9 @@ export class NvencExecutor {
       await fs.move(stage, request.outputPath, { overwrite: false });
       verificationMs = Date.now() - verificationStarted;
       const elapsed = Math.max(1, Date.now() - started);
-      this.log('[pipeline-summary] ' + JSON.stringify({ status: 'completed', backend: 'nvencc', plannedFrames: planned, plannedFramesEstimated: !Number(video.nb_frames), encodedFrames: frames,
-        elapsedMs: elapsed, setupMs, nativeProcessMs, verificationMs, averagePipelineFps: frames * 1000 / elapsed, nativeReportedFps: fps, gpuTensorSharingConfirmed: zeroCopy, audioTracks: request.encoding.simple.audioCodec === 'none' ? [] : selectedOrdinals(source, 'audio', request.encoding.audioTracks), subtitleTracks: selectedOrdinals(source, 'subtitle', request.encoding.subtitleTracks) }));
-      if (zeroCopy !== true) this.log('[nvencc] GPU tensor sharing was not confirmed. Include this log when reporting performance; this run is not proof of a fully GPU-resident inference path.');
+      this.log('[pipeline-summary] ' + JSON.stringify({ status: 'completed', backend: 'nvencc', processing: isShader ? 'shader' : 'onnx', filter: label, plannedFrames: planned, plannedFramesEstimated: !Number(video.nb_frames), encodedFrames: frames,
+        elapsedMs: elapsed, setupMs, nativeProcessMs, verificationMs, averagePipelineFps: frames * 1000 / elapsed, nativeReportedFps: fps, gpuTensorSharingConfirmed: isShader ? null : zeroCopy, audioTracks: request.encoding.simple.audioCodec === 'none' ? [] : selectedOrdinals(source, 'audio', request.encoding.audioTracks), subtitleTracks: selectedOrdinals(source, 'subtitle', request.encoding.subtitleTracks) }));
+      if (!isShader && zeroCopy !== true) this.log('[nvencc] GPU tensor sharing was not confirmed. Include this log when reporting performance; this run is not proof of a fully GPU-resident inference path.');
       this.send({ type: 'complete', currentFrame: frames, totalFrames: frames, fps: frames * 1000 / elapsed, percentage: 100, message: 'Processing completed successfully!' });
     } catch (error) {
       this.log('[pipeline-summary] ' + JSON.stringify({ status: this.stopped ? 'cancelled' : 'failed', backend: 'nvencc', encodedFrames: frames, elapsedMs: Date.now() - started }));

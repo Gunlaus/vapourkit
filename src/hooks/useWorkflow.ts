@@ -27,7 +27,7 @@ interface ImportWorkflowModalState {
     name: string;
     code: string;
     description?: string;
-    filterType: 'aiModel' | 'custom' | 'videoSource';
+    filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
     category?: string | string[];
     parameters?: Filter['parameters'];
     variables?: Filter['variables'];
@@ -168,6 +168,7 @@ export function useWorkflow({
           sourcePath: wf.sourcePath,
           align: wf.align,
           chain: wf.chain,
+          shader: wf.shader,
           modelPath: resolvedModelPath,
           modelType: wf.modelType,
           category: wf.category,
@@ -266,6 +267,7 @@ export function useWorkflow({
             sourcePath: filter.sourcePath,
             align: filter.align,
             chain: filter.chain,
+            shader: filter.shader,
             modelPath: portableModelName,
             modelType: filter.filterType === 'aiModel' ? (filter.modelType || 'image') : undefined,
             category,

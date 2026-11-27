@@ -1,3 +1,4 @@
+import { ShaderSelectorModal } from './ShaderSelectorModal';
 import { Fragment, memo, useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Filter as LucideFilter, Info, Sparkles, ToggleLeft, ToggleRight, ChevronsDownUp, ChevronsUpDown, Film } from 'lucide-react';
 import type { BackendId, FilterBackend, Filter, FilterTemplate, ModelFile } from '../electron.d';
@@ -119,6 +120,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
   const [draftStep, setDraftStep] = useState<Filter | null>(null);
   const draftStepRef = useRef<Filter | null>(null);
   const [showFilterSelector, setShowFilterSelector] = useState<string | null>(null);
+  const [showShaderSelector, setShowShaderSelector] = useState<string | null>(null);
   const [showModelSelector, setShowModelSelector] = useState<string | null>(null);
   /** Side chains folded shut in the rail, by Load Video id. */
   const [collapsedChains, setCollapsedChains] = useState<Set<string>>(new Set());
@@ -170,6 +172,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
       setDraftStep(null);
       setShowFilterSelector(null);
       setShowModelSelector(null);
+      setShowShaderSelector(null);
     }
     const dirty = dirtyCodeRef.current;
     setPendingFilters(normalizeChainOrder(filters).map(filter =>
@@ -279,6 +282,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
     setDraftStep(null);
     setShowFilterSelector(null);
     setShowModelSelector(null);
+    setShowShaderSelector(null);
   };
   const commitPickedStep = (id: string, fields: Partial<Filter>) => {
     const draft = draftStepRef.current;
@@ -602,6 +606,8 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
     remove: handleRemoveFilter,
     openModelSelector: setShowModelSelector,
     openFilterSelector: setShowFilterSelector,
+    openShaderSelector: setShowShaderSelector,
+    setShader: (id, shader) => patchStep(id, f => ({ ...f, shader })),
     setBackend: (id: string, backend: FilterBackend) =>
       patchStep(id, f => ({ ...f, backend: backend === 'auto' ? undefined : backend })),
     setStreams: (id: string, numStreams: number | undefined) => patchStep(id, f => ({ ...f, numStreams })),
@@ -762,6 +768,10 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
                     VS Filter
                   </button>
                   <button
+                    onClick={() => addStep(newStep('shader', 'GLSL Shader'), setShowShaderSelector)}
+                    className="w-full px-3 py-1.5 text-left text-[12.5px] hover:bg-ink-800 flex items-center gap-2 text-ink-200 border-b border-ink-800"
+                  ><Sparkles className="w-4 h-4 text-accent-400" />GLSL Shader</button>
+                  <button
                     onClick={() => { void handleAddVideoSource(); }}
                     title="Load a second video with its own steps — a side chain another step can read from"
                     className="w-full px-3 py-1.5 text-left text-[12.5px] hover:bg-ink-800 transition-colors flex items-center gap-2 text-ink-200"
@@ -892,6 +902,10 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
           onClose={() => setEditingTemplate(null)}
         />
       )}
+
+      {showShaderSelector && <ShaderSelectorModal onClose={closePicker} onSelect={shader => {
+        commitPickedStep(showShaderSelector, { shader, preset: shader.name ?? 'GLSL Shader' });
+      }} />}
 
       {/* Filter Selector Modal */}
       {showFilterSelector && (

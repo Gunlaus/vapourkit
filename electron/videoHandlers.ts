@@ -400,7 +400,7 @@ export function registerVideoHandlers(
         executor.onDiagnostic = message => itemLogger.write(message);
         if (executor instanceof NvencExecutor) {
           qlog('Execution backend: NVEncC GPU (experimental)');
-          if (!isUpscaling) throw new Error('Enable AI upscaling to test the NVEncC GPU path, or select VapourSynth execution.');
+          if (!isUpscaling && !filters?.some(f => f.enabled && f.filterType === 'shader')) throw new Error('Enable model processing or add a GLSL shader for the NVEncC GPU path.');
           await executor.execute({ inputPath: videoPath, outputPath, filters: filters ?? [], defaultBackend,
             encoding: configManager.getEncodingSettings(), processingFormat: configManager.getProcessingFormat(),
             colorimetry: configManager.getColorimetrySettings(), segment, benchmark: benchmarkMode },

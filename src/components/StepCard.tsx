@@ -1,3 +1,5 @@
+import { ShaderSettingsCard } from './ShaderSettingsCard';
+import type { ShaderSettings } from '../../electron/shaderTypes';
 import type { DragEvent } from 'react';
 import { GripVertical, X, ChevronDown, ChevronUp, Save, Trash2, Download, Filter as LucideFilter, Sparkles, Copy, Crop, Palette, Edit3 } from 'lucide-react';
 import type { BackendId, FilterBackend, Filter, FilterTemplate, ModelFile } from '../electron.d';
@@ -56,6 +58,8 @@ export interface StepCardActions {
   remove: (id: string) => void;
   openModelSelector: (id: string) => void;
   openFilterSelector: (id: string) => void;
+  openShaderSelector: (id: string) => void;
+  setShader: (id: string, value: ShaderSettings) => void;
   setBackend: (id: string, backend: FilterBackend) => void;
   setStreams: (id: string, value: number | undefined) => void;
   toggleSaveForm: (id: string) => void;
@@ -344,6 +348,8 @@ export function StepCard({
                   )}
                 </div>
               </>
+            ) : filter.filterType === 'shader' ? (
+              <ShaderSettingsCard value={filter.shader} disabled={isProcessing} onChoose={() => actions.openShaderSelector(filter.id)} onChange={value => actions.setShader(filter.id, value)} />
             ) : (
               // Custom Filter Content
               <>

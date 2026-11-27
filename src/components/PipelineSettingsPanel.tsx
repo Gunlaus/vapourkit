@@ -60,7 +60,7 @@ export function PipelineSettingsPanel() {
         <option value="vapoursynth">VapourSynth (standard)</option>
         <option value="nvencc" disabled={!runtime?.supported || !runtime.installed || runtime.busy}>NVEncC GPU (experimental)</option>
       </select></label>
-      <p>NVEncC runs one RGB image model and NVIDIA encoding in a GPU pipeline on Windows x64. This first version supports full progressive BT.709 SDR videos, Simple output settings, and no active VS filters or side chains. Use MKV to keep subtitles. Dedicated preview uses VapourSynth; live encoding preview is unavailable on this path.</p>
+      <p>NVEncC runs one RGB image model or one GLSL shader with NVIDIA encoding in a GPU pipeline on Windows x64. This first version supports full progressive BT.709 SDR videos, Simple output settings, and no active VS filters or side chains. Use MKV to keep subtitles. Dedicated preview uses VapourSynth for models; shader preview and live encoding preview are unavailable on this path.</p>
       {runtime?.supported && <div className="space-y-2 border border-ink-700 p-2">
         <button type="button" disabled={runtime.busy} className="text-accent-400 disabled:opacity-50" onClick={() => void install()}>{runtime.busy ? 'Installing…' : runtime.installed ? 'Repair NVEncC backend' : `Download optional NVEncC backend (${(runtime.downloadBytes / 1e9).toFixed(1)} GB)`}</button>
         <p>Requires 16 GiB free disk space during setup. Installs NVEncC {runtime.version} and its runtime separately from the existing Python/TensorRT environment. First use builds a separate engine cache.</p>

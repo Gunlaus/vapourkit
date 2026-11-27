@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  chooseShader: (presetId?: string) => ipcRenderer.invoke('shader-choose', presetId),
+  getShaderInfo: (settings: import('./shaderTypes').ShaderSettings) => ipcRenderer.invoke('shader-info', settings),
   getRtxRuntimeStatus: () => ipcRenderer.invoke('rtx-runtime-status'),
   installRtxRuntime: () => ipcRenderer.invoke('rtx-runtime-install'),
   getNvencRuntimeStatus: () => ipcRenderer.invoke('nvencc-runtime-status'),

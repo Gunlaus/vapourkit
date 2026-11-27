@@ -75,6 +75,7 @@
         "files": [
             "dist/**/*",
             "include/models/**/*.onnx",
+            "include/shaders/**/*",
             "include/plugins/**/*.7z",
             "include/plugins/plugin_filters/**/*",
             "include/scripts/**/*.7z",
@@ -96,6 +97,7 @@
         ],
         "asarUnpack": [
             "include/models/**/*.onnx",
+            "include/shaders/**/*",
             "include/plugins/**/*.7z",
             "include/plugins/plugin_filters/**/*",
             "include/scripts/**/*.7z",

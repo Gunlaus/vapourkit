@@ -877,3 +877,10 @@ describe('optional RTX script integration', () => {
     expect(script).toContain('"tensorrt-rtx": "TRT"');
   });
 });
+
+it('never silently skips an enabled GLSL shader in a VapourSynth script', async () => {
+  const shader: Filter = { id: 'shader', enabled: true, filterType: 'shader', preset: 'GLSL Shader', order: 0, code: '',
+    shader: { path: '/custom.glsl', scale: 2, parameters: {} } };
+  await expect(generate([shader])).rejects.toThrow(/GLSL shaders currently require NVEncC/);
+  expect(await generate([{ ...shader, enabled: false }])).not.toContain('GLSL Shader');
+});

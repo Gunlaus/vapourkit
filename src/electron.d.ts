@@ -56,6 +56,8 @@ export interface ElectronAPI {
   installRepositoryFilter: (id: string) => Promise<{ message: string }>;
   checkEncodingSupport: (request: { encoder: import('../electron/encodingSupportTypes').NvencEncoder; pixelFormat: string }) => Promise<import('../electron/encodingSupportTypes').EncodingSupport>;
   getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
+  chooseShader: (presetId?: string) => Promise<import('../electron/shaderTypes').ShaderSettings | null>;
+  getShaderInfo: (settings: import('../electron/shaderTypes').ShaderSettings) => Promise<import('../electron/shaderTypes').ShaderInfo>;
   getRtxRuntimeStatus: () => Promise<import('../electron/rtxTypes').RtxRuntimeStatus>;
   installRtxRuntime: () => Promise<import('../electron/rtxTypes').RtxRuntimeStatus>;
   getNvencRuntimeStatus: () => Promise<import('../electron/nvencTypes').NvencRuntimeStatus>;
@@ -680,7 +682,7 @@ export interface Filter {
   id: string;
   enabled: boolean;
   /** 'videoSource' is a Load Video step, which heads a side chain (electron/chainGraph.ts). */
-  filterType: 'aiModel' | 'custom' | 'videoSource';
+  filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
   preset: string;
   code: string;
   order: number;
@@ -690,6 +692,7 @@ export interface Filter {
   align?: SideChainAlignment;
   /** The Load Video step whose side chain this step is in; absent for the main chain. */
   chain?: string;
+  shader?: import('../electron/shaderTypes').ShaderSettings;
   modelPath?: string;
   modelType?: 'vsr' | 'image';
   category?: string | string[];
@@ -889,13 +892,14 @@ export interface WorkflowData {
     description?: string;
     enabled: boolean;
     order: number;
-    filterType: 'aiModel' | 'custom' | 'videoSource';
+    filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
     /** A Load Video step's file. Absolute, so a workflow moved to another machine names it as it was. */
     sourcePath?: string;
     align?: SideChainAlignment;
     /** The exported id of the Load Video step heading this step's side chain. */
     chain?: string;
-    modelPath?: string;
+    shader?: import('../electron/shaderTypes').ShaderSettings;
+  modelPath?: string;
     modelType?: 'vsr' | 'image';
     category?: string | string[];
     backend?: FilterBackend;

@@ -1,3 +1,4 @@
+import { registerShaderHandlers } from './shaderHandlers';
 import { registerFilterRepositoryHandlers } from './filterRepositoryHandlers';
 import { registerModelCatalogHandlers } from './modelCatalogHandlers';
 import { registerAlignHandlers } from './alignHandlers';
@@ -32,6 +33,7 @@ export function registerAllIpcHandlers(
 ) {
   // Register all handler groups
   registerDialogHandlers();
+  registerShaderHandlers();
   registerFilterRepositoryHandlers();
   registerModelCatalogHandlers();
   registerModelHandlers(mainWindow);

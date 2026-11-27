@@ -1,3 +1,4 @@
+import type { ShaderSettings } from './shaderTypes';
 // electron/scriptGenerator.ts
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -69,7 +70,7 @@ export interface Filter {
   id: string;
   enabled: boolean;
   /** 'videoSource' is a Load Video step, which heads a side chain (chainGraph.ts). */
-  filterType: 'aiModel' | 'custom' | 'videoSource';
+  filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
   preset: string;
   code: string;
   order: number;
@@ -79,6 +80,7 @@ export interface Filter {
   align?: SideChainAlignment;
   /** The Load Video step whose side chain this step is in; absent for the main chain. */
   chain?: string;
+  shader?: ShaderSettings;
   modelPath?: string;
   modelType?: 'vsr' | 'image';
   /** Inference backend override for this filter; 'auto' or unset inherits the app default. */
@@ -389,6 +391,9 @@ export class VapourSynthScriptGenerator {
     const sideChains = layout.side.filter(sideChainRuns);
     const enabledMain = layout.main.steps.filter(f => f.enabled);
     const enabledFilters = [...sideChains.flatMap(chain => chain.steps.filter(f => f.enabled)), ...enabledMain];
+    if (enabledFilters.some(f => f.filterType === 'shader')) {
+      throw new Error('GLSL shaders currently require NVEncC execution in Settings → Processing. Use one main-chain shader with Simple NVIDIA encoding. Shader validation and preview are not available through VapourSynth yet.');
+    }
     if (enabledFilters.some(filter => resolveFilterBackend(filter.backend, defaultBackend) === 'tensorrt-rtx')) {
       await ensureEngineBuilderScript();
     }

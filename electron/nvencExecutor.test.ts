@@ -17,7 +17,7 @@ vi.mock('./constants', async () => {
 vi.mock('./logger', () => ({ logger: { upscale: vi.fn() } }));
 vi.mock('./ffmpegManager', () => ({ FFmpegManager: { getFFprobePath: () => '/ffprobe' } }));
 vi.mock('./gpuSelection', () => ({ getGpuChoice: () => undefined, findChosenGpu: vi.fn() }));
-vi.mock('./utils', () => ({ fixAsarPath: (p: string) => p, setupVSEnvironment: () => ({}) }));
+vi.mock('./utils', () => ({ getBundledBasePath: () => process.cwd(), fixAsarPath: (p: string) => p, setupVSEnvironment: () => ({}) }));
 vi.mock('./nvencRuntime', () => ({ acquireNvencRuntime: async () => control.release, nvencExecutable: () => path.join(root, 'nvencc', '9.41', 'NVEncC64.exe') }));
 vi.mock('./processLifecycle', () => ({ createWorkloadSpawnOptions: (o: unknown) => o,
   terminateProcessTree: (proc: EventEmitter) => setImmediate(() => proc.emit('close', 1)),
@@ -38,7 +38,10 @@ beforeEach(async () => {
     const phase = exe === '/ffprobe' ? 'probe' : exe.endsWith('NVEncC64.exe') ? 'encode' : 'prepare';
     if (phase === 'encode') {
       // Reproduce NVEncC 9.41's literal comma-delimited parser and filesystem lookup.
-      const modelValue = args[args.indexOf('--vpp-onnx') + 1].split(',').find(p => p.startsWith('model='))!.slice(6);
+      const shader = args.includes('--vpp-libplacebo-shader');
+      const flag = shader ? '--vpp-libplacebo-shader' : '--vpp-onnx';
+      const key = shader ? 'shader=' : 'model=';
+      const modelValue = args[args.indexOf(flag) + 1].split(',').find(p => p.startsWith(key))!.slice(key.length);
       expect(path.isAbsolute(modelValue)).toBe(false);
       expect(fs.existsSync(path.resolve(opts.cwd, modelValue))).toBe(true);
       fs.writeFileSync(args[args.indexOf('-o') + 1], 'encoded'); control.env = opts.env; }
@@ -99,4 +102,20 @@ describe('NVEncC progress text', () => {
     expect(parseNativeProgress('encoded 240 frames, 30.00 fps, 1000 kbps')).toEqual({ frames: 240, fps: 30, percentage: null });
     expect(parseNativeProgress('TensorRT: building engine…')).toBeNull();
   });
+});
+
+
+it('renders a shader without starting the Python model builder and verifies the selected size', async () => {
+  const shader = path.join(root, 'custom, 日本語.glsl');
+  await fs.writeFile(shader, '//!HOOK MAIN\n//!BIND HOOKED\nvec4 hook() { return HOOKED_tex(HOOKED_pos); }');
+  await fs.outputFile(path.join(root, 'nvencc', '9.41', 'libplacebo-360.dll'), 'runtime fixture');
+  const r = request(); r.defaultBackend = 'tensorrt-rtx';
+  r.filters = [{ id: 'shader', enabled: true, filterType: 'shader', code: '', preset: 'Test shader', order: 0,
+    shader: { path: shader, scale: 2, parameters: {} } }];
+  const precision = vi.fn(), modelType = vi.fn();
+  const exec = new NvencExecutor(null, '/python', 'win32');
+  await exec.execute(r, precision, modelType);
+  expect(await fs.pathExists(output)).toBe(true);
+  expect(precision).not.toHaveBeenCalled(); expect(modelType).not.toHaveBeenCalled();
+  expect(control.spawn.mock.calls.map(call => call[0])).toEqual(['/ffprobe', path.join(root, 'nvencc', '9.41', 'NVEncC64.exe'), '/ffprobe']);
 });
