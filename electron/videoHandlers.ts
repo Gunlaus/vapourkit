@@ -1,3 +1,5 @@
+import { useNativeShaders } from './shaderRouting';
+import { nvencRuntimeStatus } from './nvencRuntime';
 import { nvencPreflight } from './nvencPreflight';
 import { NvencExecutor } from './nvencExecutor';
 import { nvencEncoderOf } from './encodingSupport';
@@ -349,7 +351,8 @@ export function registerVideoHandlers(
 
       const vspipePath = dependencyManager.getVSPipePath();
       const pythonPath = dependencyManager.getPythonExecutablePath();
-      const nativeRequested = configManager.getPipelineSettings?.().executionBackend === 'nvencc';
+      const nativeRequest = { inputPath: videoPath, outputPath, filters: filters ?? [], defaultBackend, encoding: configManager.getEncodingSettings(), processingFormat: configManager.getProcessingFormat(), colorimetry: configManager.getColorimetrySettings(), segment, benchmark: benchmarkMode };
+      const nativeRequested = useNativeShaders(nativeRequest, (await nvencRuntimeStatus()).installed);
       const executor = nativeRequested ? new NvencExecutor(mainWindow, pythonPath) : new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
 
       // The job is in the slot from here on, so a cancel at any later await

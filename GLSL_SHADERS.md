@@ -1,46 +1,39 @@
-# GLSL shaders in NVEncC
+# Shader library and automatic processing
 
-Use **Add filter → GLSL Shader** for the bundled Anime4K CNN 2× Small, Medium
-and Large presets, or import an mpv/libplacebo `.glsl` hook shader. Imports are
-copied to a private content-addressed cache, leaving the original file intact.
-Closing the picker before selecting a shader adds no chain step.
+**Add filter → GLSL Shader** opens the searchable, categorized shader library.
+The defaults cover anime upscaling/restoration/denoising, RAVU general-image
+upscaling for live-action comparisons, and SDR color, sharpening and effects.
+Source versions and licenses are in `include/shaders/SOURCES.md`.
 
-Choose **Settings → Processing → Execution backend: NVEncC GPU**, install or
-repair that optional backend if necessary, and use **Simple NVIDIA** H.264,
-HEVC or AV1 encoding. The inference selector does not affect shader-only runs:
-no ONNX model or TensorRT engine is required. GPU rendering uses NVEncC 9.41's
-libplacebo integration and its packaged `libplacebo-360.dll`.
+**Add GLSL shader** imports an mpv/libplacebo `.glsl` or `.hook` file into an
+editor for its name, optional description, categories, default scale and source
+code. Saving creates an internal Vapourkit copy. Closing before saving creates
+no library entry or chain step. Library edits affect future selections;
+existing selected snapshots remain reproducible until selected again.
 
-This first version accepts **one main-chain shader**, including multiple
-internal shader passes. AI-plus-shader chains, VS filters, side chains,
-segments, and benchmark-to-null mode are rejected with an explanation. Input
-is full, progressive, limited-range BT.709 SDR YUV420 in 8 or 10 bits, as in the
-existing native path. Output remains YUV420 at the selected 8/10-bit depth;
-MKV retains selected subtitles and their attachments. The encoded video is
-checked for dimensions, codec, bit depth, frame count where known and selected
-tracks before the temporary output is published.
+Stack shader steps in the desired order. Standard processing uses the
+`vs-placebo` plugin with the existing VapourSynth core and selected encoder,
+including CPU encoders. It supports preview, benchmark, segments, AI models
+and VS filters in the same chain. Install shader support from the library when
+needed; it pins `vs-placebo==2.0.5` without upgrading core/dependencies.
+The Windows plugin requests API4.0, compatible with pinned R79 and API3 filters.
+CPU encoding still uses the GPU to execute GLSL.
 
-The built-in presets use 2× output. Custom shaders offer 1×, 2×, 3× or 4× output;
-choose the size the shader is designed for. Resolution-dependent `//!WHEN`
-clauses may intentionally skip passes at other sizes. Declared scalar
-`//!PARAM` controls appear on the card, including numeric, integer, boolean
-DEFINE (0/1), and ENUM choices. Imports accept the libplacebo parameter-body
-syntax; the UI does not execute shader code or evaluate arbitrary expressions.
-Generic GLSL programs and HLSL files need conversion to mpv hook syntax first.
+There is no manual execution-backend setting. Compatible full shader-only
+Windows NVIDIA encodes use the existing NVEncC runtime automatically when
+installed, with one libplacebo stage per shader in chain order. Mixed chains,
+CPU encoding, advanced output options, benchmarks and segments stay on the
+standard pipeline. AI model inference always uses the selected standard
+inference backend, including TensorRT-RTX. Native execution retains its existing
+SDR/YUV420 source and container constraints. Optional native acceleration can
+be installed from the shader library; it is not required for CPU encoding.
 
-Queue, session, undo/redo and workflow settings carry the shader selection,
-scale and controls. Built-ins resolve by stable preset id after moving a
-workflow between installs. Custom workflow paths refer to the imported local
-copy; import the original shader again when moving to another machine.
+Declared scalar parameters are exposed on each card. Standard processing
+bakes selected parameter values into private shaders; ENUM aliases retain their
+original meanings. Native processing uses libplacebo's runtime parameter API.
+Shader GPU compilation and speed require physical GPU testing beyond CI.
 
-**Preview and Validate through VapourSynth do not run shaders yet.** The app
-reports that restriction instead of silently skipping the step. Start with a
-short source clip, inspect the encoded output, then compare the native
-`pipeline-summary` for longer runs. Shader summaries identify `processing:
-"shader"`; the ONNX tensor-sharing metric is not used for shader renders.
-
-The intended hardware path is GPU decoding → libplacebo shader rendering →
-NVENC. CUDA/rendering interoperability still performs GPU copies and
-synchronization. This feature does not claim zero copies or guaranteed speed
-or quality relative to TensorRT-RTX. Windows/NVIDIA hardware tests remain
-necessary beyond the mocked lifecycle and command tests.
+The console has a clear-view button and opens at the latest result. Clearing
+uses a byte cursor, leaving the diagnostic log file intact. New output follows
+the bottom while the user is there; scrolling back pauses following until the
+bottom is reached or the console is reopened.

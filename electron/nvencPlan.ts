@@ -18,18 +18,20 @@ export function nativeProcessingFilter(request: NvencRequest): Filter {
   const shaderWorkflow = request.filters.some(f => f.enabled && f.filterType === 'shader');
   const fail = (message: string): never => {
     const advice = shaderWorkflow
-      ? 'For shader renders, use one main-chain shader, NVEncC execution, and Simple NVIDIA encoding.'
-      : 'Select VapourSynth execution in Settings → Processing for this workflow.';
+      ? 'Native acceleration supports shader-only chains with Simple NVIDIA encoding. Other workflows use standard processing.'
+      : 'Use standard processing for this workflow.';
     throw new Error(`NVEncC GPU path: ${message} ${advice}`);
   };
   if (request.benchmark) fail('Use a normal encode for this experimental backend.');
   if (request.segment?.enabled) fail('The first version supports full videos; segment trimming is not yet supported.');
   const enabled = request.filters.filter(f => f.enabled);
-  if (enabled.length !== 1 || !['aiModel', 'shader'].includes(enabled[0].filterType) || enabled[0].chain) fail('Choose exactly one AI model or GLSL shader on the main chain, with no active VS filters or side chains. AI-plus-shader chains are not enabled yet.');
+  if (!enabled.length || enabled.some(f => f.chain) || !(enabled.every(f => f.filterType === 'shader') || (enabled.length === 1 && enabled[0].filterType === 'aiModel'))) fail('Choose exactly one AI model or GLSL shader on the main chain, with no active VS filters or side chains. AI-plus-shader chains are not enabled yet.');
   const filter = enabled[0];
   if (filter.filterType === 'shader') {
-    if (!filter.shader) fail('Choose a GLSL shader file.');
-    validateShaderSettings(filter.shader!);
+    for (const step of enabled) {
+      if (!step.shader) fail('Choose a GLSL shader file.');
+      validateShaderSettings(step.shader!);
+    }
   } else {
     if (!filter.modelPath) fail('Choose an AI model.');
     if (filter.modelType === 'vsr') fail('Choose a single-image RGB model; temporal models are not yet supported.');
@@ -59,7 +61,7 @@ export function selectedOrdinals(probe: NativeProbe, type: 'audio' | 'subtitle',
 }
 
 /** NVEncC uses one-based per-type track numbers; Vapourkit stores zero-based ordinals. */
-export function nvencArgs(request: NvencRequest, probe: NativeProbe, modelPath: string, cachePath: string, precision: 'fp16' | 'fp32', outputPath: string, device = 0): string[] {
+export function nvencArgs(request: NvencRequest, probe: NativeProbe, modelPath: string | string[], cachePath: string, precision: 'fp16' | 'fp32', outputPath: string, device = 0, shaderFlags: Array<{ linearize: boolean; sigmoidize: boolean }> = []): string[] {
   const filter = nativeProcessingFilter(request);
   const video = sourceVideo(probe, filter.filterType === 'shader');
   const simple = request.encoding.simple;
@@ -69,7 +71,8 @@ export function nvencArgs(request: NvencRequest, probe: NativeProbe, modelPath: 
     : ({ bt709: 'bt709', smpte170m: 'smpte170m', bt470bg: 'bt470bg' }[video.color_space ?? ''] ?? matrix);
   // NVEncC 9.41 splits this argument on commas and assigns model= literally.
   // It does not unquote values. spawn() handles spaces in the complete argv item.
-  if (/[,"\r\n]/.test(modelPath)) throw new Error('NVEncC filter paths cannot contain commas, quotes or newlines. Use the relative prepared-model cache path.');
+  const resources = Array.isArray(modelPath) ? modelPath : [modelPath];
+  if (resources.some(file => /[,"\r\n]/.test(file))) throw new Error('NVEncC filter paths cannot contain commas, quotes or newlines. Use the relative prepared-model cache path.');
   const args = ['--avhw', '--device', String(device), '-i', request.inputPath, '-o', outputPath,
     '--codec', simple.codec === 'h265' ? 'hevc' : simple.codec, '--preset', simple.preset.toLowerCase(),
     '--tune', 'hq', '--multipass', 'none', '--lookahead', '0',
@@ -77,11 +80,17 @@ export function nvencArgs(request: NvencRequest, probe: NativeProbe, modelPath: 
     '--avsync', 'vfr', '--colormatrix', 'bt709', '--colorprim', 'bt709', '--transfer', 'bt709', '--colorrange', 'limited',
     '--log-level', 'info'];
   if (filter.filterType === 'shader') {
-    const size = shaderOutputSize(video, filter.shader!);
-    const parameters = Object.entries(filter.shader!.parameters).map(([name, value]) => `custom=${name}=${value}`);
-    args.push('--vpp-libplacebo-shader', [`shader=${modelPath}`, `res=${size.width}x${size.height}`, 'colorsystem=bt709', ...parameters].join(','));
+    const shaders = request.filters.filter(f => f.enabled).sort((a,b) => a.order - b.order);
+    if (resources.length !== shaders.length) throw new Error('Shader resources do not match the chain.');
+    let dimensions = { width: video.width!, height: video.height! };
+    for (const [index, step] of shaders.entries()) {
+      dimensions = shaderOutputSize({ codec_type: 'video', ...dimensions }, step.shader!);
+      const parameters = Object.entries(step.shader!.parameters).map(([name, value]) => `custom=${name}=${value}`);
+      const stages = [...(shaderFlags[index]?.linearize ? ['linear=true'] : []), ...(shaderFlags[index]?.sigmoidize ? ['sigmoid=true'] : [])];
+      args.push('--vpp-libplacebo-shader', [`shader=${resources[index]}`, `res=${dimensions.width}x${dimensions.height}`, 'colorsystem=bt709', ...stages, ...parameters].join(','));
+    }
   } else {
-    args.push('--vpp-onnx', `model=${modelPath},provider=tensorrt,prec=${precision},colormatrix=${inputMatrix},colormatrix_out=bt709,colorrange=${video.color_range === 'pc' ? 'full' : 'limited'},frames=1`, '--vpp-onnx-cache-dir', cachePath);
+    args.push('--vpp-onnx', `model=${resources[0]},provider=tensorrt,prec=${precision},colormatrix=${inputMatrix},colormatrix_out=bt709,colorrange=${video.color_range === 'pc' ? 'full' : 'limited'},frames=1`, '--vpp-onnx-cache-dir', cachePath);
   }
   if (simple.rateControl === 'bitrate') args.push('--vbr', String(Math.round((simple.bitrateMbps ?? 8) * 1000)));
   else args.push('--qvbr', String(simple.quality));
@@ -121,7 +130,8 @@ export function verifyNativeOutput(probe: NativeProbe, result: NativeProbe, requ
   if (video.length !== 1 || !video[0].width || !video[0].height) throw new Error('NVEncC produced no readable output video.');
   const shader = request.filters.find(f => f.enabled && f.filterType === 'shader');
   if (shader?.shader) {
-    const expected = shaderOutputSize(sourceVideo(probe, true), shader.shader);
+    let expected = { width: sourceVideo(probe, true).width!, height: sourceVideo(probe, true).height! };
+    for (const step of request.filters.filter(f => f.enabled).sort((a,b) => a.order-b.order)) expected = shaderOutputSize({ codec_type: 'video', ...expected }, step.shader!);
     if (video[0].width !== expected.width || video[0].height !== expected.height) throw new Error('NVEncC shader output dimensions do not match the selected scale. Output was not published.');
   }
   const codec = request.encoding.simple.codec === 'h265' ? 'hevc' : request.encoding.simple.codec;
@@ -130,7 +140,7 @@ export function verifyNativeOutput(probe: NativeProbe, result: NativeProbe, requ
   const audio = request.encoding.simple.audioCodec === 'none' ? [] : selectedOrdinals(probe, 'audio', request.encoding.audioTracks);
   const subtitles = selectedOrdinals(probe, 'subtitle', request.encoding.subtitleTracks);
   for (const [type, expected] of [['audio', audio], ['subtitle', subtitles]] as const) {
-    if (result.streams.filter(s => s.codec_type === type).length !== expected.length) throw new Error(`NVEncC did not preserve the selected ${type} tracks. Output was not published; use VapourSynth execution and include the item log in your report.`);
+    if (result.streams.filter(s => s.codec_type === type).length !== expected.length) throw new Error(`NVEncC did not preserve the selected ${type} tracks. Output was not published; use standard processing (for example CPU encoding) and include the item log in your report.`);
   }
   if (subtitles.length && result.streams.filter(s => s.codec_type === 'attachment').length !== probe.streams.filter(s => s.codec_type === 'attachment').length) throw new Error('NVEncC did not preserve the source subtitle attachments. Output was not published.');
   const frames = Number(probe.streams.find(s => s.codec_type === 'video')?.nb_frames);

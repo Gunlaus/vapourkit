@@ -17,7 +17,7 @@ export function RtxRuntimePanel() {
   return <div className="space-y-2 border border-ink-700 p-2">
     <strong>TensorRT-RTX inference (experimental)</strong>
     <p>An optional NVIDIA RTX backend for AI models, including supported temporal RGB windows. Uses separate validated engines compiled on first use. VS script filters keep classic TensorRT. Performance varies by model; compare with standard TensorRT.</p>
-    <p>Keep the execution backend on VapourSynth. Select TensorRT-RTX in the inference selector after installation. The first run includes compilation and GPU initialization; compare subsequent runs with identical precision and settings.</p>
+    <p>Select TensorRT-RTX in the inference selector after installation. The first run includes compilation and GPU initialization; compare subsequent runs with identical precision and settings.</p>
     <button type="button" disabled={runtime.busy || runtime.installed} className="text-accent-400 disabled:opacity-50" onClick={() => {
       setError(''); setRuntime({ ...runtime, busy: true });
       void window.electronAPI.installRtxRuntime().then(setRuntime).catch(err => setError(String(err)));

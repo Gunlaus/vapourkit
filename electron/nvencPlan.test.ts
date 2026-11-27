@@ -20,7 +20,7 @@ describe('native GPU plan eligibility', () => {
     { filters: [] }, { benchmark: true }, { segment: { enabled: true, startFrame: 0, endFrame: 100 } },
     { processingFormat: 'vs.RGBS' }, { outputPath: 'D:/input.mkv' }, { defaultBackend: 'directml' },
   ] as Partial<NvencRequest>[])('explains unsupported workflows %j', changes => {
-    expect(() => nativeProcessingFilter(request(changes))).toThrow(/VapourSynth execution/);
+    expect(() => nativeProcessingFilter(request(changes))).toThrow(/standard processing/);
   });
   it('does not drop an active filter or side chain', () => {
     const r = request(); r.filters.push({ id: 'blur', filterType: 'custom', enabled: true, order: 1, code: 'clip=blur(clip)', preset: 'Blur' });
@@ -129,4 +129,15 @@ describe('native GLSL path', () => {
     expect(() => verifyNativeOutput(source, { streams: [video] }, r)).not.toThrow();
     expect(() => verifyNativeOutput(source, { streams: [{ ...video, width: 1920 }] }, r)).toThrow(/dimensions/);
   });
+});
+
+it('keeps multiple native shader steps in order and accumulates output scaling', () => {
+  const r = request();
+  r.filters = [
+    { id: 'second', enabled: true, filterType: 'shader', code: '', preset: 'B', order: 2, shader: { path: '/b.glsl', scale: 1, parameters: {} } },
+    { id: 'first', enabled: true, filterType: 'shader', code: '', preset: 'A', order: 1, shader: { path: '/a.glsl', scale: 2, parameters: {} } },
+  ];
+  const args = nvencArgs(r, source, ['a.glsl','b.glsl'], '/unused', 'fp16', '/stage.mkv');
+  const shaders = args.flatMap((arg,index) => arg === '--vpp-libplacebo-shader' ? [args[index+1]] : []);
+  expect(shaders).toEqual(['shader=a.glsl,res=3840x2160,colorsystem=bt709','shader=b.glsl,res=3840x2160,colorsystem=bt709']);
 });

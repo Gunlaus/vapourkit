@@ -7,7 +7,7 @@ vi.mock('./constants', async () => {
   return { PATHS: { APP_DATA: p.join(o.tmpdir(), `vk shader, import ${process.pid}`) } };
 });
 vi.mock('./utils', () => ({ getBundledBasePath: () => process.cwd() }));
-import { inspectShader, prepareShader, shaderInfo } from './shaders';
+import { inspectShader, prepareShader, shaderInfo, specializeShader } from './shaders';
 import { SHADER_PRESETS, validateShaderSettings } from './shaderTypes';
 const root = path.join(os.tmpdir(), `vk shader, import ${process.pid}`);
 const file = path.join(root, 'source, 日本語.glsl');
@@ -63,11 +63,26 @@ describe('GLSL import and declared controls', () => {
   });
   it('resolves bundled presets by stable id even after a workflow moves machines', async () => {
     for (const preset of SHADER_PRESETS) {
-      const settings = { path: '/old-machine/missing.glsl', presetId: preset.id, scale: 2, parameters: {} };
+      const settings = { path: '/old-machine/missing.glsl', presetId: preset.id, scale: preset.scale, parameters: {} };
       expect((await shaderInfo(settings)).name).toBe(preset.name);
       const result = await prepareShader(settings);
-      expect((await fs.readFile(result.file, 'utf8'))).toContain('//!HOOK MAIN');
-      expect((await fs.readFile(result.file, 'utf8'))).toContain('MIT License');
+      expect((await fs.readFile(result.file, 'utf8'))).toMatch(/\/\/!HOOK (MAIN|LUMA)/);
+      expect((await fs.readFile(result.file, 'utf8'))).toContain('hook()');
     }
   });
+});
+
+
+it('specializes numeric and enum parameters without losing enum meanings or hook conditions', () => {
+  const numeric = specializeShader(text, { GAIN: 1.75, ENABLED: 0 });
+  expect(inspectShader(numeric, 'changed').parameters.map(p => p.default)).toEqual([1.75,0]);
+  const source = '//!PARAM MODE\n//!TYPE ENUM DEFINE\nSoft\nStrong\n\n//!HOOK MAIN\n//!BIND HOOKED\n//!WHEN MODE Strong =\nvec4 hook() { return HOOKED_tex(HOOKED_pos); }';
+  const changed = specializeShader(source, { MODE: 1 });
+  expect(changed).toContain('//!WHEN MODE 1 =');
+  expect(changed).toContain('#define Strong 1');
+  expect(inspectShader(changed, 'enum').parameters[0].default).toBe(1);
+});
+
+it('records required rendering hooks so a LINEAR shader is not silently skipped', () => {
+  expect(inspectShader(text.replace('//!HOOK MAIN', '//!HOOK LINEAR'), 'linear').hooks).toEqual(['LINEAR']);
 });

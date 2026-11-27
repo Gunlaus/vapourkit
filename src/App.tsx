@@ -92,7 +92,7 @@ function App() {
   }, []);
 
   // Setup and initialization hooks
-  const { consoleOutput, consoleEndRef, addConsoleLog } = useConsoleLog();
+  const { consoleOutput, consoleEndRef, addConsoleLog, clearConsole } = useConsoleLog();
   const { isSetupComplete, isCheckingDeps, hasCudaSupport, recommendedBackend, setupProgress, isSettingUp, handleSetup, pluginInstallError, setupError, setupWarnings, handleRetryPlugins, handleContinueWithoutPlugins } = useSetup(addConsoleLog);
 
   // An NVIDIA driver too old for the bundled FFmpeg's NVENC fails every NVENC
@@ -1168,6 +1168,7 @@ function App() {
                   <ConsoleDrawer
                     open={showConsole}
                     onClose={handleCloseConsole}
+                    onClear={() => { void clearConsole(); }}
                     consoleOutput={consoleOutput}
                     consoleEndRef={consoleEndRef}
                     privacyMode={privacyMode}

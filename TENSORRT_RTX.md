@@ -7,8 +7,7 @@ bundle installed. The optional install pins its four wheels without dependency
 resolution, preserving the current VapourSynth and classic TensorRT packages.
 It checks SDK/plugin loading before marking the addition ready.
 
-Keep **Execution backend: VapourSynth**, then select **TensorRT-RTX
-(experimental)** as the inference backend, globally or per AI model. Existing
+Select **TensorRT-RTX (experimental)** as the inference backend, globally or per AI model. Existing
 classic engines are resolved back to their original ONNX; they cannot be loaded
 by RTX. Select a model's intended precision as usual. FP16 exports are not
 promoted into purported FP32 models, and FP32 exports are only converted when
@@ -19,7 +18,7 @@ shared ONNX spatial contract, padding discovery and private pad/crop adapter.
 Models with other tensor contracts still need their own adapters. VS script
 filters continue to use the regular TensorRT backend; this addition changes the
 main AI-model inference calls only. It does not replace VapourSynth or change
-its API compatibility. NVEncC execution keeps its existing runtime and restrictions.
+its API compatibility. Native acceleration is reserved for eligible shader-only NVIDIA jobs.
 
 The first use at an input resolution builds a private RTX engine in
 `data/tensorrt-rtx/engines`. Cache identity includes source and external weights,

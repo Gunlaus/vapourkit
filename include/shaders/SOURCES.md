@@ -17,3 +17,18 @@ These are neural shaders trained for anime. Their appearance and performance
 should be compared on the user's actual source; they are not substitutes for
 all restoration models. They require a 2× output target to activate their
 resolution-dependent passes.
+
+Additional curated sources:
+
+- Anime4K Restore CNN Small and Bilateral Mean Denoise: unmodified shaders
+  from the same pinned Anime4K 4.0.1 commit and MIT license above.
+- RAVU Lite AR r3: unmodified `ravu-lite-ar-r3.hook` (stored as `.glsl`) from
+  [bjin/mpv-prescalers](https://github.com/bjin/mpv-prescalers), commit
+  `b3f0a59d68f33b7162051ea5970a5169558f0ea2`. LGPL-3.0-or-later;
+  copyright notices retained in the shader, license in `RAVU-LICENSE`.
+- SDR Color Controls, Warm/Cool Tint, Gentle Sharpen, Grayscale and Vignette
+  are project-authored SDR hook shaders under the project's GPL-3.0 license.
+
+Anime presets target animation; RAVU is a general-image luma upscaler offered
+for live-action comparisons. The general color/effect shaders work across
+content types. Neither categorization nor model size guarantees better output.

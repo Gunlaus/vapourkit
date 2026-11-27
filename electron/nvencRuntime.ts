@@ -26,7 +26,7 @@ export async function acquireNvencRuntime(): Promise<() => void> {
   if (status.busy) throw new Error('NVEncC installation is still running. Wait for it to finish.');
   inUse++;
   try {
-    if (!(await nvencRuntimeStatus()).installed) throw new Error('Install the optional NVEncC GPU backend in Settings → Processing first.');
+    if (!(await nvencRuntimeStatus()).installed) throw new Error('Install NVIDIA shader acceleration from Add filter → GLSL Shader first.');
     let released = false;
     return () => { if (!released) { released = true; inUse--; } };
   } catch (error) { inUse--; throw error; }

@@ -4,6 +4,12 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
   chooseShader: (presetId?: string) => ipcRenderer.invoke('shader-choose', presetId),
+  listShaderLibrary: () => ipcRenderer.invoke('shader-library-list'),
+  readShaderLibrary: (id: string) => ipcRenderer.invoke('shader-library-read', id),
+  saveShaderLibrary: (entry: import('./shaderTypes').ShaderLibraryEntry) => ipcRenderer.invoke('shader-library-save', entry),
+  importShaderLibrary: () => ipcRenderer.invoke('shader-library-import'),
+  getShaderRuntimeStatus: () => ipcRenderer.invoke('shader-runtime-status'),
+  installShaderRuntime: () => ipcRenderer.invoke('shader-runtime-install'),
   getShaderInfo: (settings: import('./shaderTypes').ShaderSettings) => ipcRenderer.invoke('shader-info', settings),
   getRtxRuntimeStatus: () => ipcRenderer.invoke('rtx-runtime-status'),
   installRtxRuntime: () => ipcRenderer.invoke('rtx-runtime-install'),
@@ -137,7 +143,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVersion: () => ipcRenderer.invoke('get-version'),
   
   // Log file reading (efficient polling-based console)
-  readLogTail: (maxLines?: number) => ipcRenderer.invoke('read-log-tail', maxLines),
+  readLogTail: (maxLines?: number, afterOffset?: number) => ipcRenderer.invoke('read-log-tail', maxLines, afterOffset),
+  getConsoleLogCursor: () => ipcRenderer.invoke('console-log-cursor'),
   resetLogCache: () => ipcRenderer.invoke('reset-log-cache'),
   
   // Folder access

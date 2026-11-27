@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 export const useConsoleLog = () => {
   const [consoleOutput, setConsoleOutput] = useState<string[]>([]);
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const offset = useRef(0), generation = useRef(0), clearing = useRef(false);
   const lastLineRef = useRef<string>('');
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -21,7 +22,11 @@ export const useConsoleLog = () => {
   useEffect(() => {
     const pollLogFile = async () => {
       try {
-        const result = await window.electronAPI.readLogTail(300);
+        if (clearing.current) return;
+        const version = generation.current;
+        const result = await window.electronAPI.readLogTail(300, offset.current);
+        if (clearing.current || version !== generation.current) return;
+        if (result.endOffset !== undefined && result.endOffset < offset.current) { offset.current = 0; setConsoleOutput([]); }
         
         if (result.hasNewContent && result.lines.length > 0) {
           const newLastLine = result.lines[result.lines.length - 1];
@@ -51,33 +56,17 @@ export const useConsoleLog = () => {
     };
   }, []); // Empty deps - only setup once
 
-  // Auto-scroll console to bottom when new content arrives
-  // Debounced with 'auto' behavior to prevent continuous animations
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
-  useEffect(() => {
-    // Clear any pending scroll
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
-    
-    // Debounce scrolling to prevent excessive DOM reflows
-    scrollTimeoutRef.current = setTimeout(() => {
-      if (consoleEndRef.current) {
-        consoleEndRef.current.scrollIntoView({ behavior: 'auto' });
-      }
-    }, 100);
-    
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
-  }, [consoleOutput]);
+  const clearConsole = useCallback(async () => {
+    generation.current++; clearing.current = true;
+    setConsoleOutput([]); lastLineRef.current = '';
+    try { offset.current = await window.electronAPI.getConsoleLogCursor(); }
+    finally { clearing.current = false; }
+  }, []);
 
   return {
     consoleOutput,
     consoleEndRef,
     addConsoleLog,
+    clearConsole,
   };
 };

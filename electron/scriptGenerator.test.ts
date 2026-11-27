@@ -89,6 +89,7 @@ async function generate(
 
 beforeAll(async () => {
   await fs.ensureDir(path.join(testRoot, 'include'));
+  await fs.copy(path.join(__dirname, '..', 'include', 'shaders'), path.join(testRoot, 'include', 'shaders'));
   for (const file of ['vk_rtx_runtime.py', 'build_trt_engine.py']) {
     await fs.copy(path.join(__dirname, '..', 'include', file), path.join(testRoot, 'include', file));
   }
@@ -250,7 +251,7 @@ describe('inference backend selection', () => {
     const templatePath = path.join(testRoot, 'data', 'config', 'vapoursynth_template.vpy');
     const before = await fs.readFile(templatePath, 'utf-8');
     const script = await generate([aiFilter(0, 'C:/models/m.engine')], false, undefined, 2, 'win32', {
-      executionBackend: 'vapoursynth', previewHeight: 720, previewFps: 1, trtCudaGraphs: false, cpuThreads: 6, cacheMiB: 2048, frameRequests: 4,
+      previewHeight: 720, previewFps: 1, trtCudaGraphs: false, cpuThreads: 6, cacheMiB: 2048, frameRequests: 4,
     });
     expect(script).toContain('use_cuda_graph=False');
     expect(script).toContain('core.num_threads = 6');
@@ -881,6 +882,17 @@ describe('optional RTX script integration', () => {
 it('never silently skips an enabled GLSL shader in a VapourSynth script', async () => {
   const shader: Filter = { id: 'shader', enabled: true, filterType: 'shader', preset: 'GLSL Shader', order: 0, code: '',
     shader: { path: '/custom.glsl', scale: 2, parameters: {} } };
-  await expect(generate([shader])).rejects.toThrow(/GLSL shaders currently require NVEncC/);
+  // Invalid file fails explicitly rather than dropping the shader.
+  await expect(generate([shader])).rejects.toThrow(/Shader file is missing/);
   expect(await generate([{ ...shader, enabled: false }])).not.toContain('GLSL Shader');
+});
+
+
+it('emits multiple standard shader steps around VS filters for CPU encoding and preview', async () => {
+  const shader: Filter = { id: 'shader-a', enabled: true, filterType: 'shader', preset: 'Color', order: 0, code: '',
+    shader: { path: '/portable/old.glsl', presetId: 'vk-color', scale: 1, parameters: { GAIN: 1.25 } } };
+  const script = await generate([shader, customFilter(1, 'Blur'), { ...shader, id: 'shader-b', order: 2 }]);
+  expect(script.match(/core.placebo.Shader/g)?.length).toBe(2);
+  expect(script.indexOf('core.placebo.Shader')).toBeLessThan(script.indexOf('# Custom Filter: Blur'));
+  expect(script.lastIndexOf('core.placebo.Shader')).toBeGreaterThan(script.indexOf('# Custom Filter: Blur'));
 });

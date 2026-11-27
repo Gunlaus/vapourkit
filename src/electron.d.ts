@@ -57,6 +57,12 @@ export interface ElectronAPI {
   checkEncodingSupport: (request: { encoder: import('../electron/encodingSupportTypes').NvencEncoder; pixelFormat: string }) => Promise<import('../electron/encodingSupportTypes').EncodingSupport>;
   getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
   chooseShader: (presetId?: string) => Promise<import('../electron/shaderTypes').ShaderSettings | null>;
+  listShaderLibrary: () => Promise<import('../electron/shaderTypes').ShaderLibraryEntry[]>;
+  readShaderLibrary: (id: string) => Promise<import('../electron/shaderTypes').ShaderLibraryEntry>;
+  saveShaderLibrary: (entry: import('../electron/shaderTypes').ShaderLibraryEntry) => Promise<import('../electron/shaderTypes').ShaderLibraryEntry>;
+  importShaderLibrary: () => Promise<import('../electron/shaderTypes').ShaderLibraryEntry | null>;
+  getShaderRuntimeStatus: () => Promise<{ installed: boolean; busy: boolean }>;
+  installShaderRuntime: () => Promise<{ installed: boolean; busy: boolean }>;
   getShaderInfo: (settings: import('../electron/shaderTypes').ShaderSettings) => Promise<import('../electron/shaderTypes').ShaderInfo>;
   getRtxRuntimeStatus: () => Promise<import('../electron/rtxTypes').RtxRuntimeStatus>;
   installRtxRuntime: () => Promise<import('../electron/rtxTypes').RtxRuntimeStatus>;
@@ -205,7 +211,8 @@ export interface ElectronAPI {
   getVersion: () => Promise<{ version: string }>;
   
   // Log file reading (efficient polling-based console)
-  readLogTail: (maxLines?: number) => Promise<{ lines: string[]; hasNewContent: boolean; error?: string }>;
+  getConsoleLogCursor: () => Promise<number>;
+  readLogTail: (maxLines?: number, afterOffset?: number) => Promise<{ lines: string[]; hasNewContent: boolean; endOffset?: number; error?: string }>;
   resetLogCache: () => Promise<{ success: boolean }>;
   
   // Folder access

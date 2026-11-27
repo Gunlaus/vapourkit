@@ -5,7 +5,7 @@ import { getBundledBasePath } from './utils';
 import { PATHS } from './constants';
 import { SHADER_PRESETS, validateShaderSettings, type ShaderSettings, type ShaderInfo, type ShaderParameter } from './shaderTypes';
 
-const MAX_SHADER_BYTES = 2 * 1024 * 1024;
+const MAX_SHADER_BYTES = 8 * 1024 * 1024;
 /** Read declarations only. GLSL is compiled by libplacebo, never evaluated as JS/Python. */
 export function inspectShader(text: string, name: string): ShaderInfo {
   if (!/^\s*\/\/!HOOK\s+\S+/m.test(text) || !/\b(?:vec4|void)\s+hook\s*\(/.test(text)) throw new Error('Choose an mpv/libplacebo hook shader (.glsl). Generic GLSL and HLSL files are not supported.');
@@ -48,7 +48,7 @@ export function inspectShader(text: string, name: string): ShaderInfo {
     validateParameter(parameter, parameter.default);
     parameters.push(parameter);
   }
-  return { name, description: /^\s*\/\/!DESC\s+(.+)$/m.exec(text)?.[1]?.trim() ?? 'Custom mpv/libplacebo shader.', parameters };
+  return { name, hooks: [...new Set([...text.matchAll(/^\s*\/\/!HOOK\s+(\w+)/gm)].map(match => match[1]))], description: /^\s*\/\/!DESC\s+(.+)$/m.exec(text)?.[1]?.trim() ?? 'Custom mpv/libplacebo shader.', parameters };
 }
 function validateParameter(parameter: ShaderParameter, value: number): void {
   if ((parameter.type === 'float' && Math.abs(value) > 3.4028234663852886e38)
@@ -68,16 +68,16 @@ export function shaderSource(settings: ShaderSettings): string {
 async function shaderBytes(file: string): Promise<Buffer> {
   if (path.extname(file).toLowerCase() !== '.glsl') throw new Error('Choose a .glsl shader file.');
   const stat = await fs.stat(file).catch(() => { throw new Error('Shader file is missing. Import it again from Add filter → GLSL Shader.'); });
-  if (!stat.isFile() || stat.size > MAX_SHADER_BYTES) throw new Error('Shader files must be at most 2 MiB.');
+  if (!stat.isFile() || stat.size > MAX_SHADER_BYTES) throw new Error('Shader files must be at most 8 MiB.');
   const bytes = await fs.readFile(file);
-  if (bytes.length > MAX_SHADER_BYTES) throw new Error('Shader files must be at most 2 MiB.');
+  if (bytes.length > MAX_SHADER_BYTES) throw new Error('Shader files must be at most 8 MiB.');
   return bytes;
 }
 export async function shaderInfo(settings: ShaderSettings): Promise<ShaderInfo> {
   const source = shaderSource(settings);
   const info = inspectShader((await shaderBytes(source)).toString('utf8'), settings.name ?? path.basename(source));
   const preset = SHADER_PRESETS.find(p => p.id === settings.presetId);
-  return preset ? { ...info, name: preset.name, description: preset.description } : info;
+  return { ...info, name: settings.name ?? preset?.name ?? info.name, description: settings.description ?? preset?.description ?? info.description };
 }
 /** Import/copy to a content-addressed path, safe for NVEncC's comma-delimited parser. */
 export async function prepareShader(settings: ShaderSettings): Promise<{ file: string; info: ShaderInfo }> {
@@ -99,4 +99,59 @@ export async function prepareShader(settings: ShaderSettings): Promise<{ file: s
     finally { await fs.remove(stage); }
   }
   return { file: target, info };
+}
+
+/** Bake selected parameter values into a private shader for the VS binding.
+ * ENUM labels retain their original numeric meanings through #defines.
+ */
+export function specializeShader(text: string, parameters: Record<string, number>): string {
+  const info = inspectShader(text, 'shader');
+  const defines: string[] = [];
+  const result = text;
+  // Each parameter block ends at the next directive after its initial body.
+  const parts = result.split(/(?=^\s*\/\/!PARAM\s+)/m);
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    const header = /^\s*\/\/!PARAM\s+(\w+)\s*\r?\n/.exec(part);
+    if (!header) continue;
+    const parameter = info.parameters.find(p => p.name === header[1])!;
+    if (!(parameter.name in parameters)) continue;
+    validateParameter(parameter, parameters[parameter.name]);
+    const lines = part.slice(header[0].length).split(/\r?\n/);
+    let body = 0;
+    while (body < lines.length && (!lines[body].trim() || /^\s*\/\/!/.test(lines[body]))) body++;
+    let end = body;
+    while (end < lines.length && !/^\s*\/\/!/.test(lines[end])) end++;
+    if (parameter.choices) {
+      for (const [i, label] of parameter.choices.entries()) {
+        if (!/^[A-Za-z_]\w*$/.test(label)) throw new Error('Shader enum labels must be GLSL identifiers.');
+        defines.push(`#define ${label} ${i}`);
+      }
+      for (let i = 0; i < body; i++) lines[i] = lines[i].replace(/(\/\/!TYPE\s+)ENUM\s+/, '$1');
+    }
+    lines.splice(body, end - body, String(parameters[parameter.name]), '');
+    parts[index] = header[0] + lines.join('\n');
+  }
+  let specialized = parts.join('');
+  for (const definition of defines) {
+    const [, label, value] = /^#define (\w+) (\d+)$/.exec(definition)!;
+    const token = new RegExp('\\b' + label + '\\b', 'g');
+    specialized = specialized.replace(/(^\s*\/\/!(?:WHEN|WIDTH|HEIGHT)\s+)([^\n]*)/gm, (_match, prefix, expression) => prefix + expression.replace(token, value));
+  }
+  // Put enum aliases in every hook body, after its //! header.
+  return defines.length ? specialized.replace(/(^\s*\/\/!HOOK[^\n]*\n(?:\s*\/\/![^\n]*\n)*)/gm, '$1' + defines.join('\n') + '\n') : specialized;
+}
+export async function prepareVsShader(settings: ShaderSettings): Promise<{ file: string; linearize: boolean; sigmoidize: boolean }> {
+  const prepared = await prepareShader(settings);
+  const text = specializeShader(await fs.readFile(prepared.file, 'utf8'), settings.parameters);
+  const id = createHash('sha256').update(text).digest('hex');
+  const target = path.join(PATHS.APP_DATA, 'shaders', 'runtime', id + '.glsl');
+  await fs.ensureDir(path.dirname(target));
+  if ((await fs.readFile(target, 'utf8').catch(() => null)) !== text) {
+    const { randomUUID } = await import('crypto');
+    const stage = target + '.' + randomUUID() + '.tmp';
+    try { await fs.writeFile(stage, text); await fs.rename(stage, target); } finally { await fs.remove(stage); }
+  }
+  const hooks = prepared.info.hooks ?? [];
+  return { file: target, linearize: hooks.includes('LINEAR') || hooks.includes('SIGMOID'), sigmoidize: hooks.includes('SIGMOID') };
 }

@@ -113,16 +113,21 @@ export class NvencExecutor {
       planned = Number(video.nb_frames) || Math.round(Number(source.format?.duration ?? video.duration) * averageFps) || 0;
       this.send({ type: 'progress', currentFrame: 0, totalFrames: planned, fps: 0, percentage: 0, message: 'Preparing NVEncC GPU backend…' });
       let resourcePath: string;
+      let shaderResources: string[] = [];
+      let shaderFlags: Array<{ linearize: boolean; sigmoidize: boolean }> = [];
       let label: string;
       let engineIdentity = '';
       if (isShader) {
         const runtimeFiles = await fs.readdir(path.dirname(nvencExecutable()));
         if (!runtimeFiles.some(name => /^libplacebo.*\.dll$/i.test(name))) {
-          throw new Error('The NVEncC libplacebo runtime is missing. Repair the NVEncC backend in Settings → Processing.');
+          throw new Error('The NVEncC libplacebo runtime is missing. Repair NVIDIA shader acceleration from Add filter → GLSL Shader.');
         }
-        const prepared = await prepareShader(filter.shader!);
-        resourcePath = prepared.file;
-        label = prepared.info.name;
+        const shaders = request.filters.filter(f => f.enabled).sort((a,b) => a.order-b.order);
+        const prepared = await Promise.all(shaders.map(step => prepareShader(step.shader!)));
+        shaderResources = prepared.map(p => p.file);
+        shaderFlags = prepared.map(p => ({ linearize: (p.info.hooks ?? []).some(h => h === 'LINEAR' || h === 'SIGMOID'), sigmoidize: (p.info.hooks ?? []).includes('SIGMOID') }));
+        resourcePath = shaderResources[0];
+        label = prepared.map(p => p.info.name).join(' → ');
         this.log('[nvencc] GLSL shader processing through libplacebo; no AI model or TensorRT engine build is required. The GPU driver compiles the shader on use.');
       } else {
         const sourcePath = await this.sourceModel(filter.modelPath!);
@@ -155,7 +160,8 @@ export class NvencExecutor {
       // NVEncC fingerprints model.onnx itself, not its external weights.bin.
       // Namespace its cache by the complete prepared source identity as well.
       const engineCache = path.join(PATHS.APP_DATA, 'nvencc', 'engine-cache', engineIdentity);
-      const args = nvencArgs(request, source, modelArgument, engineCache, !isShader && useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device);
+      const shaderArguments = shaderResources.map(file => path.relative(path.dirname(executable), file));
+      const args = nvencArgs(request, source, isShader ? shaderArguments : modelArgument, engineCache, !isShader && useFp32(filter.modelPath!) ? 'fp32' : 'fp16', stage, device, shaderFlags);
       if (!isShader) await fs.ensureDir(engineCache);
       const env = { ...process.env, PATH: path.dirname(executable) + path.delimiter + (process.env.PATH ?? '') };
       // Preserve user-supplied device masks. Both enumeration and NVEncC use
