@@ -30,6 +30,7 @@ class ModelRuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        runtime._GRAPH_FALLBACKS.clear()
     def tearDown(self): self.temp.cleanup()
     def test_real_graph_and_external_weights_are_fingerprinted(self):
         source = self.root / 'model.onnx'; model(source, external=True)
@@ -86,6 +87,31 @@ class ModelRuntimeTests(unittest.TestCase):
         with patch.dict(sys.modules, {'vapoursynth': fake}):
             runtime.raw_model(['frame'], 'test.engine', 2, {'inputs': [{'dtype': 'DataType.FLOAT'}]})
             fake.core.trt.Model.assert_called_with([('frame', 32)], engine_path='test.engine', num_streams=2)
+    def test_cuda_graph_replay_uses_the_existing_engine_and_stream_count(self):
+        fake = types.SimpleNamespace(core=MagicMock())
+        with patch.dict(sys.modules, {'vapoursynth': fake}):
+            output = runtime.trt_model(['frame'], 'checked.engine', 3, True)
+        self.assertIs(output, fake.core.trt.Model.return_value)
+        fake.core.trt.Model.assert_called_once_with(['frame'], engine_path='checked.engine', num_streams=3, use_cuda_graph=True)
+    def test_graph_setup_failure_falls_back_once_and_keeps_diagnostics_on_stderr(self):
+        fake = types.SimpleNamespace(core=MagicMock())
+        fake.core.trt.Model.side_effect = [RuntimeError('capture unsupported'), 'ordinary', 'again']
+        import io
+        stderr, stdout = io.StringIO(), io.StringIO()
+        with patch.dict(sys.modules, {'vapoursynth': fake}), patch('sys.stderr', stderr), patch('sys.stdout', stdout):
+            self.assertEqual(runtime.trt_model(['frame'], 'checked.engine', 2, True), 'ordinary')
+            self.assertEqual(runtime.trt_model(['frame'], 'checked.engine', 2, True), 'again')
+        self.assertEqual(fake.core.trt.Model.call_count, 3)
+        self.assertNotIn('use_cuda_graph', fake.core.trt.Model.call_args.kwargs)
+        self.assertIn('capture unsupported', stderr.getvalue())
+        self.assertEqual(stdout.getvalue(), '')
+    def test_graph_fallback_does_not_hide_an_invalid_model(self):
+        fake = types.SimpleNamespace(core=MagicMock())
+        fake.core.trt.Model.side_effect = [RuntimeError('capture failed'), RuntimeError('profile invalid')]
+        with patch.dict(sys.modules, {'vapoursynth': fake}), self.assertRaisesRegex(RuntimeError, 'profile invalid') as caught:
+            runtime.trt_model(['frame'], 'checked.engine', 2, True)
+        self.assertEqual(str(caught.exception.__cause__), 'capture failed')
+        self.assertFalse(runtime._GRAPH_FALLBACKS)
     def test_failed_postbuild_validation_keeps_previous_engine(self):
         source = self.root / 'model.onnx'; model(source)
         target = self.root / 'model.engine'; target.write_bytes(b'working engine')

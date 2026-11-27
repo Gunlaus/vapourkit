@@ -24,7 +24,7 @@ export const tensorrtProvider: InferenceProvider = {
   modelCallCode(inputExpr: string, modelFile: string, opts: ModelCallOptions): string {
     return [
       'import vk_model_runtime as _vk_models',
-      `clip = _vk_models.load_model(${inputExpr}, ${JSON.stringify(modelFile.replace(/\\/g, '/'))}, streams=${opts.numStreams})`,
+      `clip = _vk_models.load_model(${inputExpr}, ${JSON.stringify(modelFile.replace(/\\/g, '/'))}, streams=${opts.numStreams}, use_cuda_graph=${opts.useCudaGraph ? 'True' : 'False'})`,
       '',
     ].join('\n');
   },

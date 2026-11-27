@@ -10,7 +10,9 @@ async function pass(chunks: Buffer[]) {
 describe('Matroska binary transport', () => {
   it('preserves video exactly when the EBML header is split across chunks', async () => {
     const header = Buffer.from('1a45dfa3', 'hex'); const data=Buffer.alloc(1024*1024, 137);
-    expect(await pass([header.subarray(0,1),header.subarray(1,3),Buffer.concat([header.subarray(3),data])])).toEqual(Buffer.concat([header,data]));
+    const result = await pass([header.subarray(0,1),header.subarray(1,3),Buffer.concat([header.subarray(3),data])]);
+    // Compare bytes natively instead of deep-walking a million indexed properties.
+    expect(result.equals(Buffer.concat([header,data]))).toBe(true);
   });
   it('identifies diagnostics contaminating stdout instead of forwarding them as video', async () => {
     await expect(pass([Buffer.from('[vk-build] compiling engine\n')])).rejects.toThrow('diagnostics to stdout');

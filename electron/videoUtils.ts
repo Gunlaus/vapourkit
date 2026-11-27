@@ -10,6 +10,7 @@ import { parseBestSourceProgress } from './bestSourceProgressParser';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
+import { cachedSourceProbe } from './sourceProbeCache';
 
 const execFileAsync = promisify(execFile);
 
@@ -74,9 +75,11 @@ async function runFfmpegProbe(filePath: string): Promise<string | null> {
  */
 export async function probeVideo(filePath: string): Promise<VideoProbe> {
   try {
+    return await cachedSourceProbe(filePath, FFmpegManager.getFFmpegPath() ?? '', async () => {
     const output = await runFfmpegProbe(filePath);
     if (output === null) return { display: {}, streams: null };
     return { display: { ...parseDisplayMetadata(output), tracks: parseContainerTracks(output) }, streams: parseVideoMetadata(output) };
+    });
   } catch (probeError) {
     logger.error('Error extracting video metadata with ffmpeg:', probeError);
     return { display: {}, streams: null };

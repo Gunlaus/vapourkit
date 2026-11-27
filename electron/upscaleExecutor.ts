@@ -178,7 +178,10 @@ export class UpscaleExecutor {
     this.runStartedAt = Date.now();
     const outputInfo = probes.output;
     this.diagnostic('[pipeline-settings] ' + JSON.stringify({ output: outputInfo.resolution, pixelFormat: outputInfo.pixelFormat,
-      requests: 'automatic', preview: isPreviewEnabled(),
+      requests: configManager.getPipelineSettings?.().frameRequests || 'automatic', preview: isPreviewEnabled(),
+      cpuThreads: configManager.getPipelineSettings?.().cpuThreads || 'automatic',
+      cacheMiB: configManager.getPipelineSettings?.().cacheMiB || 'template',
+      cudaGraphs: configManager.getPipelineSettings?.().trtCudaGraphs ?? true,
       previewHeight: configManager.getPipelineSettings?.().previewHeight ?? 720, previewFps: configManager.getPipelineSettings?.().previewFps ?? 1 }));
     const totalFrames = outputInfo.frames;
     this.logExecutionStart(scriptPath, inputPath, outputPath, totalFrames);
@@ -312,7 +315,7 @@ export class UpscaleExecutor {
 
   private spawnVspipe(scriptPath: string, env: NodeJS.ProcessEnv) {
     logger.upscale('Spawning vspipe process');
-    return spawn(this.vspipePath, vspipeArgs(scriptPath), createWorkloadSpawnOptions({
+    return spawn(this.vspipePath, vspipeArgs(scriptPath, configManager.getPipelineSettings?.().frameRequests), createWorkloadSpawnOptions({
       stdio: ['ignore', 'pipe', 'pipe'],
       env: env,
       cwd: this.vsPath
@@ -439,7 +442,9 @@ export class UpscaleExecutor {
     let previewFrameBuffer = Buffer.alloc(0);
     const MAX_PREVIEW_BUFFER_SIZE = 5 * 1024 * 1024; // 5MB max buffer
     let lastPreviewSentTime = 0;
-    const MIN_PREVIEW_INTERVAL_MS = 750; // Throttle to ~1.3 previews per second to reduce GUI blocking
+    // FFmpeg already limits generation. Leave room for delivery jitter so an
+    // image arriving just under one interval is not dropped every other frame.
+    const MIN_PREVIEW_INTERVAL_MS = 900 / (configManager.getPipelineSettings?.().previewFps ?? 1);
     let isProcessingPreview = false; // Prevent concurrent preview processing
 
     // Capture preview frames from ffmpeg stdout

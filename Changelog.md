@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Processing performance
+- Enable TensorRT CUDA Graph replay with a normal-inference fallback when graph setup is unsupported, and a switch for comparison or troubleshooting.
+- Limit encoding-preview generation by elapsed time before scaling and JPEG compression; keep output encoding settings unchanged.
+- Expose frame-request, CPU-thread and frame-cache overrides, preserving runtime defaults at zero and user-kept templates on disk.
+- Reuse unchanged source metadata briefly across preview and queue setup; invalidate changed files and retry failed probes.
+
 ### Browse more VapourSynth filters
 - The VS filter picker can browse VSRepo, show API/platform compatibility and source links, and install compatible plugins or scripts with their dependencies.
 - Downloads are hash-checked and tested in a temporary Python process before publication. Existing files are preserved, verified dependencies are reused, and app-managed inference packages and BestSource stay under Vapourkit's installer.

@@ -14,6 +14,7 @@ import { getProvider } from './providers/registry';
 import type { InferenceProvider } from './providers/types';
 import { parseReferenceVideo } from './referenceVideo';
 import { timecodesPathFor } from './sourceTiming';
+import { pipelineSettingsSchema, type PipelineSettings } from './pipelineSettings';
 import {
   layoutChains,
   resolveReference,
@@ -120,6 +121,7 @@ export interface ScriptConfig {
   validationMode?: boolean; // If true, only process first 5 seconds for validation
   sourceFps?: number; // Source video FPS for validation frame calculation
   generatePreviewOutputs?: boolean; // If true, add output nodes after each filter for vs-view
+  performance?: Partial<PipelineSettings>;
 }
 
 export class VapourSynthScriptGenerator {
@@ -363,6 +365,7 @@ export class VapourSynthScriptGenerator {
     await this.syncRuntime();
     const templatePath = this.getTemplatePath();
     let template = await fs.readFile(templatePath, 'utf-8');
+    const performance = pipelineSettingsSchema.parse(config.performance ?? {});
 
     // This main-process boundary protects against imported settings, workflows,
     // and queue items containing a backend unsupported by the current OS.
@@ -478,7 +481,7 @@ export class VapourSynthScriptGenerator {
         const filterUseFp32 = configManager.isModelFp32(filter.modelPath);
         const filterModelType = configManager.getModelType(filter.modelPath);
         const filterTemporalFrames = configManager.getTemporalFrames(filter.modelPath);
-        filterCode += this.generateAIModelCode(filter, provider, filterUseFp32, filterModelType, defaultMatrix, defaultPrimaries, defaultTransfer, filter.numStreams ?? config.numStreams, filterTemporalFrames);
+        filterCode += this.generateAIModelCode(filter, provider, filterUseFp32, filterModelType, defaultMatrix, defaultPrimaries, defaultTransfer, filter.numStreams ?? config.numStreams, filterTemporalFrames, performance.trtCudaGraphs);
         stageLabel = this.basename(filter.modelPath).replace(/\.(onnx|engine)$/i, '');
       } else if (filter.filterType === 'custom' && filter.code.trim()) {
         // Insert custom filter code
@@ -572,6 +575,10 @@ export class VapourSynthScriptGenerator {
 
     // Metadata/preview/encode setup remains lazy. Explicit validation executes one
     // frame through the whole graph, without seeking to the end of the source.
+    // Apply overrides to the generated copy only; keep the user's template intact.
+    // Frame evaluation has not started yet. Zero preserves the template/runtime default.
+    if (performance.cpuThreads) template += `\ncore.num_threads = ${performance.cpuThreads}\n`;
+    if (performance.cacheMiB) template += `\ncore.max_cache_size = ${performance.cacheMiB}\n`;
     if (config.validationMode) template += '\n# Validate the first output frame.\nclip.get_frame(0)\n';
     // Script print() calls are diagnostics. Only vspipe may write media to fd 1.
     template = 'import sys as _vk_sys\n_vk_sys.stdout = _vk_sys.stderr\n' + template;
@@ -586,7 +593,7 @@ export class VapourSynthScriptGenerator {
    * (RGB conversion, temporal frame shifting, YUV restore) is backend-agnostic;
    * the model invocation itself comes from the filter's inference provider.
    */
-  private generateAIModelCode(filter: Filter, provider: InferenceProvider, useFp32: boolean, modelType: ModelType, defaultMatrix: string, defaultPrimaries: string, defaultTransfer: string, numStreams?: number, temporalFrames?: number): string {
+  private generateAIModelCode(filter: Filter, provider: InferenceProvider, useFp32: boolean, modelType: ModelType, defaultMatrix: string, defaultPrimaries: string, defaultTransfer: string, numStreams?: number, temporalFrames?: number, useCudaGraph = true): string {
     if (!filter.modelPath) return '';
 
     // Constant for the VapourSynth clip variable name
@@ -608,7 +615,7 @@ export class VapourSynthScriptGenerator {
     code += `${CLIP} = core.std.Expr(${CLIP}, expr=['x 0 max 1 min'])\n`;
 
     // Determine num_streams value (default to 2 if not specified)
-    const callOptions = { numStreams: numStreams ?? 2, useFp32 };
+    const callOptions = { numStreams: numStreams ?? 2, useFp32, useCudaGraph };
 
     // Generate model inference code based on model type
     if (modelType === 'vsr') {

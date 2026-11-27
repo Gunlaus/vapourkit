@@ -10,8 +10,9 @@ import { videoTimescaleFor, type AudioTrim } from './sourceTiming';
  * raw video in Matroska, which carries a timestamp for every frame. vspipe
  * accepts every format the app outputs, float RGB included.
  */
-export function vspipeArgs(scriptPath: string): string[] {
-  return ['-c', 'mkv', '--outputindex', '0', scriptPath, '-'];
+export function vspipeArgs(scriptPath: string, requests = 0): string[] {
+  const concurrency = Number.isInteger(requests) && requests >= 1 && requests <= 32 ? ['--requests', String(requests)] : [];
+  return ['-c', 'mkv', '--outputindex', '0', ...concurrency, scriptPath, '-'];
 }
 
 export function isRgbFormat(pixelFormat: string | null | undefined): boolean {
@@ -113,7 +114,12 @@ export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
   ffmpegArgs.push('-map', '0:v:0');
   const height = Math.max(180, Math.min(1080, Math.floor((input.previewHeight ?? 720) / 2) * 2));
   const previewFps = Math.max(0.1, Math.min(5, input.previewFps ?? 1));
-  ffmpegArgs.push('-vf', `fps=${previewFps},scale=-2:${height}`); // 1 fps preview, max height 720p
+  // Sample by wall time, before scaling/JPEG encoding. Media-time sampling
+  // generates many throwaway previews when a render runs faster than playback.
+  // Keep the timestamp changes scoped to this preview output.
+  const interval = 1 / previewFps;
+  ffmpegArgs.push('-vf', `select='if(gte(abs(time(0)-ld(0)),${interval}),st(0,time(0))*0+1,0)',scale=-2:${height}`);
+  ffmpegArgs.push('-fps_mode:v:0', 'vfr');
   ffmpegArgs.push('-f', 'image2pipe');
   ffmpegArgs.push('-c:v', 'mjpeg');
   ffmpegArgs.push('-pix_fmt', 'yuvj422p'); // YUV422 with full range

@@ -1018,6 +1018,7 @@ function buildScriptConfig(
     filters: request.filters ?? [],
     numStreams: request.numStreams || 2,
     outputFormat: configManager.getProcessingFormat(),
+    performance: configManager.getPipelineSettings?.(),
     segment: request.segment?.enabled ? request.segment : undefined,
     ...options,
   };

@@ -65,6 +65,7 @@ async function generate(
   defaultBackend?: string,
   numStreams?: number,
   platform: NodeJS.Platform = 'win32',
+  performance?: import('./pipelineSettings').PipelineSettings,
 ): Promise<string> {
   const generator = new VapourSynthScriptGenerator(platform);
   const scriptPath = await generator.generateScript({
@@ -73,6 +74,7 @@ async function generate(
     generatePreviewOutputs,
     defaultBackend,
     numStreams,
+    performance,
   });
   const content = await fs.readFile(scriptPath, 'utf-8');
   await fs.remove(scriptPath);
@@ -235,11 +237,23 @@ describe('declared vkfilter variables', () => {
 });
 
 describe('inference backend selection', () => {
+  it('can disable CUDA Graphs and apply scheduling without editing the saved template', async () => {
+    const templatePath = path.join(testRoot, 'data', 'config', 'vapoursynth_template.vpy');
+    const before = await fs.readFile(templatePath, 'utf-8');
+    const script = await generate([aiFilter(0, 'C:/models/m.engine')], false, undefined, 2, 'win32', {
+      previewHeight: 720, previewFps: 1, trtCudaGraphs: false, cpuThreads: 6, cacheMiB: 2048, frameRequests: 4,
+    });
+    expect(script).toContain('use_cuda_graph=False');
+    expect(script).toContain('core.num_threads = 6');
+    expect(script).toContain('core.max_cache_size = 2048');
+    expect(await fs.readFile(templatePath, 'utf-8')).toBe(before);
+  });
   it('emits TensorRT code for the Windows default backend', async () => {
     const script = await generate([aiFilter(0, 'C:\\models\\m_fp16.engine')], false);
 
     expect(script).toContain('_vk_models.load_model(clip, "C:/models/m_fp16.engine"');
     expect(script).not.toContain('core.ort.Model');
+    expect(script).toContain('use_cuda_graph=True');
   });
 
   it('loads the prebuilt engine without building one at render time', async () => {
