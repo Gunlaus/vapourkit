@@ -22,6 +22,12 @@ vi.mock('electron', async () => {
   };
 });
 
+vi.mock('./utils', async importOriginal => {
+  const actual = await importOriginal<typeof import('./utils')>();
+  const p = await import('path'), o = await import('os');
+  return { ...actual, getBundledBasePath: () => p.join(o.tmpdir(), `vk-scriptgen-test-${process.pid}`) };
+});
+
 vi.mock('./configManager', () => ({
   configManager: {
     isModelFp32: () => false,
@@ -83,6 +89,9 @@ async function generate(
 
 beforeAll(async () => {
   await fs.ensureDir(path.join(testRoot, 'include'));
+  for (const file of ['vk_rtx_runtime.py', 'build_trt_engine.py']) {
+    await fs.copy(path.join(__dirname, '..', 'include', file), path.join(testRoot, 'include', file));
+  }
   await fs.copy(path.join(__dirname, '..', 'include', 'vk_model_runtime.py'), path.join(testRoot, 'include', 'vk_model_runtime.py'));
   // generateScript reads the template from <appData>/config/; stage the real
   // bundled template there so tests exercise the actual placeholder layout
@@ -341,7 +350,7 @@ describe('inference backend selection', () => {
     expect(script).toMatch(/_vk_sys\.path\.insert\(0, ".*\/data\/config"\)/);
     expect(script).toContain('import vk_runtime\n');
     expect(script).toContain('from vk_runtime import vk_backend, vk_device_id, vk_migx_model, vk_paired_by_time, vk_reference_video, vk_open_video, vk_conform, vk_stage_missing');
-    expect(script).toContain('vk_runtime.configure(VK_BACKEND, {"tensorrt": "TRT", "directml": "ORT_DML", "ncnn": "NCNN_VK", "migraphx": "MIGX"}, VK_BUILD_ENV,');
+    expect(script).toContain('vk_runtime.configure(VK_BACKEND, {"tensorrt": "TRT", "tensorrt-rtx": "TRT", "directml": "ORT_DML", "ncnn": "NCNN_VK", "migraphx": "MIGX"}, VK_BUILD_ENV,');
     expect(script.indexOf('vk_runtime.configure(')).toBeLessThan(script.indexOf('# Custom Filter: CAS Sharpen'));
     expect(script.indexOf('original_clip = clip')).toBeLessThan(script.indexOf('import vk_runtime'));
   });
@@ -854,4 +863,17 @@ it('stages the model helper safely for concurrent preview and render generation'
   const scripts = await Promise.all(Array.from({length:4},() => generator.generateScript({inputVideo:'C:/input.mkv',filters:[]})));
   expect(new Set(scripts).size).toBe(4);
   await Promise.all(scripts.map(file => fs.remove(file)));
+});
+
+
+describe('optional RTX script integration', () => {
+  it('stages the shared builder and emits a separate ONNX/cache path', async () => {
+    const script = await generate([aiFilter(0, 'C:/models/demo.onnx', 'tensorrt-rtx')], false, 'tensorrt-rtx');
+    expect(script).toContain('import vk_rtx_runtime as _vk_rtx');
+    expect(script).toContain('_vk_rtx.load_model(clip, "C:/models/demo.onnx"');
+    expect(script).toContain('tensorrt-rtx/engines');
+    expect(await fs.pathExists(path.join(testRoot, 'data', 'build_trt_engine.py'))).toBe(true);
+    expect(await fs.pathExists(path.join(testRoot, 'data', 'config', 'vk_rtx_runtime.py'))).toBe(true);
+    expect(script).toContain('"tensorrt-rtx": "TRT"');
+  });
 });

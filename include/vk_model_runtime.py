@@ -21,6 +21,7 @@ ADAPTER = 'rgb-window-v1'
 # Bump when learned build fallbacks become incompatible with this adapter.
 ENGINE_ABI = 1
 _IDENTITY = None
+_RTX_IDENTITY = None
 
 # Retained only to recognize manifests created before the shared adapter.
 FDAT_PAD16_ADAPTER = 'bndl-fdat-v1.5-pad16-v1'
@@ -329,10 +330,21 @@ def graph_contract(source):
             'weightTypes': sorted(set(int(t.data_type) for t in model.graph.initializer))}
 
 
-def runtime_identity():
-    global _IDENTITY
-    if _IDENTITY is not None: return _IDENTITY
-    import tensorrt as trt
+def tensor_module(backend='tensorrt'):
+    if backend == 'tensorrt':
+        import tensorrt
+        return tensorrt
+    if backend == 'tensorrt-rtx':
+        import tensorrt_rtx
+        return tensorrt_rtx
+    raise ValueError('Unknown TensorRT runtime: ' + str(backend))
+
+
+def runtime_identity(backend='tensorrt'):
+    global _IDENTITY, _RTX_IDENTITY
+    cached = _RTX_IDENTITY if backend == 'tensorrt-rtx' else _IDENTITY
+    if cached is not None: return cached
+    trt = tensor_module(backend)
     import vapoursynth as vs
     driver = ctypes.CDLL('nvcuda.dll' if os.name == 'nt' else 'libcuda.so.1')
     def checked(code):
@@ -350,20 +362,26 @@ def runtime_identity():
     for package in ('nvidia-modelopt', 'onnx', 'onnxscript', 'onnx_graphsurgeon', 'onnxruntime'):
         try: packages[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError: packages[package] = 'unavailable'
-    plugin = vs.core.trt.Version()
+    plugin = (vs.core.trt_rtx if backend == 'tensorrt-rtx' else vs.core.trt).Version()
     plugin = {str(k): v.decode(errors='replace') if isinstance(v, bytes) else str(v) for k, v in plugin.items()}
     if plugin.get('path') and Path(plugin['path']).is_file():
         plugin['binarySha256'] = cached_digest(plugin['path'])
-    _IDENTITY = {'platform': platform.system(), 'machine': platform.machine(), 'tensorrt': trt.__version__,
+    identity = {'platform': platform.system(), 'machine': platform.machine(), 'tensorrt': trt.__version__,
                  'gpu': bytes(uuid).hex(), 'cudaDriver': version.value, 'plugin': plugin,
                  'adapter': ADAPTER, 'engineAbi': ENGINE_ABI, 'helper': digest(__file__), 'packages': packages}
-    return _IDENTITY
+    if backend == 'tensorrt-rtx':
+        identity['backend'] = backend
+        # Explicit ABI versions govern RTX caches, not unrelated helper edits.
+        identity.pop('helper', None)
+        _RTX_IDENTITY = identity
+    else: _IDENTITY = identity
+    return identity
 
 
-def engine_details(engine_path):
-    import tensorrt as trt
+def engine_details(engine_path, backend='tensorrt'):
+    trt = tensor_module(backend)
     logger = trt.Logger(trt.Logger.ERROR)
-    trt.init_libnvinfer_plugins(logger, '')
+    if hasattr(trt, 'init_libnvinfer_plugins'): trt.init_libnvinfer_plugins(logger, '')
     runtime = trt.Runtime(logger)
     with open(engine_path, 'rb') as stream: engine = runtime.deserialize_cuda_engine(stream.read())
     if engine is None: raise RuntimeError('TensorRT could not deserialize the built engine with the installed runtime.')
@@ -387,7 +405,7 @@ def covers(binding, shape):
 _GRAPH_FALLBACKS = set()
 
 
-def trt_model(clips, engine_path, streams, use_cuda_graph=False):
+def trt_model(clips, engine_path, streams, use_cuda_graph=False, backend='tensorrt'):
     """Replay CUDA launches when supported, without changing the engine or precision.
 
     Graph capture occurs while vstrt constructs the filter. If construction
@@ -395,14 +413,15 @@ def trt_model(clips, engine_path, streams, use_cuda_graph=False):
     Failure of both paths preserves the original exception as its cause.
     """
     import vapoursynth as vs
+    plugin = vs.core.trt_rtx if backend == 'tensorrt-rtx' else vs.core.trt
     key = (str(engine_path), streams)
     args = dict(engine_path=str(engine_path), num_streams=streams)
     if use_cuda_graph and key not in _GRAPH_FALLBACKS:
         try:
-            output = vs.core.trt.Model(clips, use_cuda_graph=True, **args)
+            output = plugin.Model(clips, use_cuda_graph=True, **args)
         except Exception as graph_error:
             try:
-                output = vs.core.trt.Model(clips, **args)
+                output = plugin.Model(clips, **args)
             except Exception as ordinary_error:
                 raise ordinary_error from graph_error
             _GRAPH_FALLBACKS.add(key)
@@ -411,17 +430,18 @@ def trt_model(clips, engine_path, streams, use_cuda_graph=False):
             return output
         print(f'[vk-performance] CUDA Graphs enabled for {Path(engine_path).name}', file=sys.stderr, flush=True)
         return output
-    return vs.core.trt.Model(clips, **args)
+    return plugin.Model(clips, **args)
 
 
-def raw_model(clips, engine_path, streams, details, use_cuda_graph=False):
+def raw_model(clips, engine_path, streams, details, use_cuda_graph=False, backend='tensorrt'):
     import vapoursynth as vs
     data_type = details['inputs'][0]['dtype'].lower()
     if data_type not in ('datatype.float', 'datatype.half', 'float32', 'float16'):
         raise RuntimeError('The engine I/O type is unsupported by the VapourSynth RGB adapter: ' + data_type)
     fmt = vs.RGBS if data_type in ('datatype.float', 'float32') else vs.RGBH
     clips = [vs.core.resize.Point(clip, format=fmt) for clip in clips]
-    return trt_model(clips, engine_path, streams, use_cuda_graph)
+    if backend == 'tensorrt': return trt_model(clips, engine_path, streams, use_cuda_graph)
+    return trt_model(clips, engine_path, streams, use_cuda_graph, backend=backend)
 
 
 class EngineValidationError(RuntimeError):
@@ -502,9 +522,15 @@ def validate_engine(engine_path, opts):
     """Real plugin inference, not only deserialization or clip metadata."""
     import numpy as np
     import vapoursynth as vs
-    details = engine_details(engine_path)
+    backend = opts.get('runtime', 'tensorrt')
+    if backend == 'tensorrt-rtx':
+        from vk_rtx_runtime import ensure_plugin
+        ensure_plugin()
+    details = engine_details(engine_path) if backend == 'tensorrt' else engine_details(engine_path, backend=backend)
+    def identity():
+        return runtime_identity() if backend == 'tensorrt' else runtime_identity(backend=backend)
     if opts.get('adapter') != ADAPTER:
-        return {'schema': SCHEMA, 'runtime': runtime_identity(), 'bindings': details,
+        return {'schema': SCHEMA, 'runtime': identity(), 'bindings': details,
                 'engineSha256': digest(engine_path), 'validation': {'execution': [], 'accuracy': 'requires-wrapper-validation'}}
     contract = graph_contract(opts['onnx'])
     if len(details['inputs']) != 1 or len(details['outputs']) != 1: raise RuntimeError('Built engine needs a dedicated multi-tensor adapter.')
@@ -525,7 +551,7 @@ def validate_engine(engine_path, opts):
         fmt = vs.RGBH if input_type in ('datatype.half', 'float16') or contract['inputs'][0]['dtype'] == 10 else vs.RGBS
         supplied = vs.core.resize.Point(clip, format=fmt)
         window = [supplied] * (channels // 3)
-        output = raw_model(window, engine_path, 1, details)
+        output = raw_model(window, engine_path, 1, details) if backend == 'tensorrt' else raw_model(window, engine_path, 1, details, backend=backend)
         for index in (0, 2):
             frame = output.get_frame(index)
             if not all(np.isfinite(np.asarray(frame[p])).all() for p in range(frame.format.num_planes)):
@@ -548,7 +574,7 @@ def validate_engine(engine_path, opts):
             accuracy['samples'].append(report)
         results.append({'input': list(shape), 'output': [output.height, output.width]})
         del output, clip, supplied, window
-    return {'schema': SCHEMA, 'contract': contract, 'sourceRelative': os.path.relpath(opts['onnx'], Path(engine_path).parent), 'runtime': runtime_identity(), 'bindings': details,
+    return {'schema': SCHEMA, 'contract': contract, 'sourceRelative': os.path.relpath(opts['onnx'], Path(engine_path).parent), 'runtime': identity(), 'bindings': details,
             'precision': 'fp32' if not (opts['fp16'] or opts['bf16']) else 'bf16' if opts['bf16'] else 'fp16',
             'engineSha256': digest(engine_path), 'validation': {'execution': results, 'accuracy': accuracy}}
 

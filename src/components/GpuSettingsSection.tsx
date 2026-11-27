@@ -6,6 +6,7 @@ import { BACKENDS } from '../utils/backends';
 /** The API each backend numbers GPUs in (include/vk_gpus.py). */
 const BACKEND_API: Record<BackendId, keyof Pick<GpuInfo, 'cuda' | 'dxgi' | 'vulkan' | 'hip'>> = {
   tensorrt: 'cuda',
+  'tensorrt-rtx': 'cuda',
   directml: 'dxgi',
   ncnn: 'vulkan',
   migraphx: 'hip',

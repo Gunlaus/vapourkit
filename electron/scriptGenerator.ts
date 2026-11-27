@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import { PATHS } from './constants';
-import { getSystemRoot } from './trtexecShim';
+import { ensureEngineBuilderScript, getSystemRoot } from './trtexecShim';
 import { gpuEnvironmentEntries, gpuScriptTarget } from './gpuSelection';
 import { app } from 'electron';
 import { fixAsarPath } from './utils';
@@ -327,19 +327,20 @@ export class VapourSynthScriptGenerator {
    * renamed over it, so a script starting meanwhile never reads half a file.
    */
   private async syncRuntime(): Promise<void> {
-    const helper = 'vk_model_runtime.py';
-    const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
-    if (await fs.pathExists(helperSource)) {
-      await fs.ensureDir(PATHS.CONFIG);
-      const content = await fs.readFile(helperSource);
-      const target = path.join(PATHS.CONFIG, helper);
-      const current = await fs.readFile(target).catch(() => null);
-      if (!current?.equals(content)) {
-        const staged = `${target}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`;
-        try {
-          await fs.writeFile(staged, content);
-          await fs.rename(staged, target);
-        } finally { await fs.remove(staged); }
+    for (const helper of ['vk_model_runtime.py', 'vk_rtx_runtime.py']) {
+      const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
+      if (await fs.pathExists(helperSource)) {
+        await fs.ensureDir(PATHS.CONFIG);
+        const content = await fs.readFile(helperSource);
+        const target = path.join(PATHS.CONFIG, helper);
+        const current = await fs.readFile(target).catch(() => null);
+        if (!current?.equals(content)) {
+          const staged = `${target}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`;
+          try {
+            await fs.writeFile(staged, content);
+            await fs.rename(staged, target);
+          } finally { await fs.remove(staged); }
+        }
       }
     }
     for (const file of RUNTIME_FILES) {
@@ -388,6 +389,9 @@ export class VapourSynthScriptGenerator {
     const sideChains = layout.side.filter(sideChainRuns);
     const enabledMain = layout.main.steps.filter(f => f.enabled);
     const enabledFilters = [...sideChains.flatMap(chain => chain.steps.filter(f => f.enabled)), ...enabledMain];
+    if (enabledFilters.some(filter => resolveFilterBackend(filter.backend, defaultBackend) === 'tensorrt-rtx')) {
+      await ensureEngineBuilderScript();
+    }
     // Where the main chain's segment starts, in its source's frames: what a
     // picture from another timeline is lined up against. Side chains are
     // never trimmed, so for them it is always 0.

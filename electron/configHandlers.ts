@@ -1,3 +1,4 @@
+import { installRtxRuntime, rtxRuntimeStatus } from './rtxRuntime';
 import { pipelineSettingsSchema } from './pipelineSettings';
 import { installNvencRuntime, nvencRuntimeStatus, clearNvencEngineCache } from './nvencRuntime';
 import { handleValidated } from './ipcValidation';
@@ -19,6 +20,8 @@ let lastLogSize = 0;
  * Registers all configuration-related IPC handlers
  */
 export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
+  ipcMain.handle('rtx-runtime-status', () => rtxRuntimeStatus());
+  ipcMain.handle('rtx-runtime-install', () => installRtxRuntime());
   ipcMain.handle('nvencc-runtime-status', () => nvencRuntimeStatus());
   ipcMain.handle('nvencc-runtime-install', () => installNvencRuntime());
   ipcMain.handle('nvencc-clear-engine-cache', () => clearNvencEngineCache());

@@ -119,6 +119,7 @@ def parse_args(argv):
         'workspace_mib': None,
         'device': None,
         'adapter': None,
+        'runtime': 'tensorrt',
     }
 
     for raw in argv:
@@ -131,7 +132,10 @@ def parse_args(argv):
         key, _, value = arg[2:].partition('=')
         value = strip_quotes(value)
 
-        if key == 'vkAdapter':
+        if key == 'vkRuntime':
+            if value not in ('tensorrt', 'tensorrt-rtx'): raise ValueError('Unknown TensorRT runtime')
+            opts['runtime'] = value
+        elif key == 'vkAdapter':
             if value != 'rgb-window-v1': raise ValueError('Unknown Vapourkit model adapter')
             opts['adapter'] = value
         elif key == 'onnx':
@@ -469,11 +473,12 @@ def blacklist_path_for(opts, fingerprint, precision):
     Importing a retrained ONNX under a different file name still reaches this
     cache because the key is its structure fingerprint, not its model name.
     """
-    cache_dir = Path(opts['save_engine']).parent / '.vapourkit-trt-blacklists'
+    cache_dir = Path(opts['save_engine']).parent / ('.vapourkit-rtx-blacklists' if opts.get('runtime') == 'tensorrt-rtx' else '.vapourkit-trt-blacklists')
     if opts.get('adapter') != 'rgb-window-v1':
         return cache_dir / f'{fingerprint}_{precision}.txt'
     from vk_model_runtime import runtime_identity
-    runtime_key = hashlib.sha256(json.dumps([runtime_identity(), {'noTF32': bool(opts.get('no_tf32'))}], sort_keys=True).encode()).hexdigest()[:16]
+    identity = runtime_identity(backend='tensorrt-rtx') if opts.get('runtime') == 'tensorrt-rtx' else runtime_identity()
+    runtime_key = hashlib.sha256(json.dumps([identity, {'noTF32': bool(opts.get('no_tf32'))}], sort_keys=True).encode()).hexdigest()[:16]
     return cache_dir / f'{fingerprint}_{precision}_{runtime_key}.txt'
 
 
@@ -661,25 +666,7 @@ def precision_converter_type(onnx_utils, autocast_utils, PrecisionConverter):
 
 def prepare_precision_context(source_model, precision, pretyped_source):
     """Prepare a reusable ModelOpt base once, rather than once per retry."""
-    try:
-        import modelopt.onnx.autocast.utils as autocast_utils
-        import modelopt.onnx.utils as onnx_utils
-        from modelopt.onnx.autocast.convert import LATEST_IR_VERSION_SUPPORTED_BY_ORT
-        from modelopt.onnx.autocast.graphsanitizer import GraphSanitizer
-        from modelopt.onnx.autocast.logging_config import configure_logging
-        from modelopt.onnx.autocast.nodeclassifier import NodeClassifier
-        from modelopt.onnx.autocast.precisionconverter import PrecisionConverter
-    except ImportError as import_error:
-        raise RuntimeError(
-            'nvidia-modelopt is required to build an FP16/BF16 TensorRT engine from an '
-            f'FP32 model ({import_error}). Reinstall plugins from the Plugins menu, or '
-            'import this model as FP32.'
-        ) from import_error
-
-    configure_logging(logging.WARNING)
-    started = time.perf_counter()
     model = deepcopy(source_model)
-
     if pretyped_source:
         index = make_graph_index(model)
         fingerprint = model_structure_fingerprint(model)
@@ -698,6 +685,24 @@ def prepare_precision_context(source_model, precision, pretyped_source):
             'fingerprint': fingerprint,
             'index': index,
         }
+
+    try:
+        import modelopt.onnx.autocast.utils as autocast_utils
+        import modelopt.onnx.utils as onnx_utils
+        from modelopt.onnx.autocast.convert import LATEST_IR_VERSION_SUPPORTED_BY_ORT
+        from modelopt.onnx.autocast.graphsanitizer import GraphSanitizer
+        from modelopt.onnx.autocast.logging_config import configure_logging
+        from modelopt.onnx.autocast.nodeclassifier import NodeClassifier
+        from modelopt.onnx.autocast.precisionconverter import PrecisionConverter
+    except ImportError as import_error:
+        raise RuntimeError(
+            'nvidia-modelopt is required to build an FP16/BF16 TensorRT engine from an '
+            f'FP32 model ({import_error}). Reinstall plugins from the Plugins menu, or '
+            'import this model as FP32.'
+        ) from import_error
+
+    configure_logging(logging.WARNING)
+    started = time.perf_counter()
 
     min_opset = 22 if precision == 'bf16' else 13
     original_opset = next(
@@ -1343,7 +1348,7 @@ def build_low_precision_engine(opts, trt):
     import onnx
 
     logger = make_capture_logger(trt, opts['verbose'])
-    trt.init_libnvinfer_plugins(logger, '')
+    if hasattr(trt, 'init_libnvinfer_plugins'): trt.init_libnvinfer_plugins(logger, '')
     precision = 'bf16' if opts['bf16'] else 'fp16'
 
     print(f'Loading ONNX model once: {opts["onnx"]}', flush=True)
@@ -1621,13 +1626,14 @@ def build_direct_engine(opts, trt, legacy_precision_flags):
 
 
 def build(opts):
-    import tensorrt as trt
+    from vk_model_runtime import tensor_module
+    trt = tensor_module(opts.get('runtime', 'tensorrt'))
 
     if opts.get('adapter') == 'rgb-window-v1' and not (opts['fp16'] or opts['bf16']):
         from vk_model_runtime import graph_contract
         if any(t in (10, 16) for t in graph_contract(opts['onnx']).get('weightTypes', [])):
             raise RuntimeError('This export already contains low-precision tensors. Select the matching precision or import an original FP32 export for FP32 execution.')
-    legacy_precision_flags = hasattr(trt.BuilderFlag, 'FP16')
+    legacy_precision_flags = opts.get('runtime') != 'tensorrt-rtx' and hasattr(trt.BuilderFlag, 'FP16')
     # TensorRT 11's strongly typed path needs graph conversion for requested
     # reduced precision. It also deliberately probes already typed FP16/BF16
     # graphs, where the only possible action is adding local FP32 fallback
@@ -1640,7 +1646,8 @@ def build(opts):
 def build_validated_candidate(opts, report_path):
     """One conservative accuracy retry; layout/NaN errors never enter it."""
     import gc
-    import tensorrt as trt
+    from vk_model_runtime import tensor_module
+    trt = tensor_module(opts.get('runtime', 'tensorrt'))
     from vk_model_runtime import validate_engine, EngineValidationError, graph_contract
     attempts = []
     def write_report(status):
@@ -1701,10 +1708,11 @@ def main(argv):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(opts['device'])
 
     try:
-        import tensorrt  # noqa: F401
+        from vk_model_runtime import tensor_module
+        tensor_module(opts['runtime'])
     except ImportError as import_error:
         print(
-            f'Error: the TensorRT Python package is not installed ({import_error}). '
+            f'Error: the {opts["runtime"]} Python package is not installed ({import_error}). '
             'Reinstall plugins from the Plugins menu.',
             file=sys.stderr,
         )

@@ -43,6 +43,7 @@ jobs:
         run: |
           python -m unittest discover -s scripts/tests -p test_model_runtime.py -v
           python -m unittest discover -s scripts/tests -p test_nvencc_model.py -v
+          python -m unittest discover -s scripts/tests -p test_rtx_runtime.py -v
 
   package-linux:
     name: Package Linux AppImage

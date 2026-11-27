@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  getRtxRuntimeStatus: () => ipcRenderer.invoke('rtx-runtime-status'),
+  installRtxRuntime: () => ipcRenderer.invoke('rtx-runtime-install'),
   getNvencRuntimeStatus: () => ipcRenderer.invoke('nvencc-runtime-status'),
   installNvencRuntime: () => ipcRenderer.invoke('nvencc-runtime-install'),
   clearNvencEngineCache: () => ipcRenderer.invoke('nvencc-clear-engine-cache'),

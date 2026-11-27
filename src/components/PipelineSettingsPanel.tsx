@@ -1,3 +1,4 @@
+import { RtxRuntimePanel } from './RtxRuntimePanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_PIPELINE_SETTINGS, pipelineSettingsSchema, type PipelineSettings } from '../../electron/pipelineSettings';
 import type { NvencRuntimeStatus } from '../../electron/nvencTypes';
@@ -68,6 +69,7 @@ export function PipelineSettingsPanel() {
         {runtime.message && <p role="status">{runtime.message}</p>}
       </div>}
       {runtimeError && <p role="alert">{runtimeError}</p>}
+      <RtxRuntimePanel />
       <label className="block">Preview height <select aria-label="Encoding preview height" className="ml-2 bg-ink-900" value={settings.previewHeight} onChange={e => update({ previewHeight: Number(e.target.value) })}>{[180,360,480,720,1080].map(n => <option key={n} value={n}>{n} pixels</option>)}</select></label>
       <label className="block">Preview frames per second <input aria-label="Encoding preview frames per second" type="number" className="ml-2 w-16 bg-ink-900" min="0.1" max="5" step="0.1" value={settings.previewFps} onChange={e => update({ previewFps: Number(e.target.value) })} /></label>
       <p>Preview controls apply to VapourSynth encoding. Disable preview before rendering to omit its output branch.</p>

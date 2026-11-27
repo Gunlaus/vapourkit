@@ -12,7 +12,7 @@
 // filtering, import modal options, script generation, plugin install — is
 // driven by this metadata and the provider module. No other files need edits.
 
-export type BackendId = 'tensorrt' | 'directml' | 'ncnn' | 'migraphx'; // future: | 'openvino'
+export type BackendId = 'tensorrt' | 'tensorrt-rtx' | 'directml' | 'ncnn' | 'migraphx'; // future: | 'openvino'
 export type BackendPlatform = 'win32' | 'linux';
 
 /** Sentinel for per-filter backend selection: inherit the app-level default. */
@@ -71,6 +71,19 @@ export const BACKENDS: readonly BackendDescriptor[] = [
     // at each resolution visible rather than looking like a freeze. Switching
     // this back to 'ORT_CUDA' is the one-line revert if TRT-for-script-filters
     // ever proves painful.
+    vsmlrtBackendAttr: 'TRT',
+  },
+  {
+    id: 'tensorrt-rtx',
+    supportedPlatforms: ['win32'],
+    label: 'TensorRT-RTX (experimental)',
+    shortLabel: 'RTX',
+    description: 'Optional NVIDIA RTX inference for AI models; compiles on first use. VS script filters keep classic TensorRT. Compare speed on your GPU.',
+    requiresEngineBuild: false,
+    runsOnnxDirectly: true,
+    importPrecisions: ['fp16', 'fp32'],
+    supportsShapes: false,
+    supportsCustomBuildParams: false,
     vsmlrtBackendAttr: 'TRT',
   },
   {
