@@ -24,3 +24,14 @@ it('offers anime, live-action, color and effect defaults with descriptions', asy
   for (const category of ['Anime','Live action','Color correction','Upscaling','Effects']) expect(entries.some(e => e.categories.includes(category))).toBe(true);
   expect(entries.every(e => !!e.description)).toBe(true);
 });
+
+
+it('relocates imported snapshots when the portable data folder moves', async () => {
+  const code = '//!HOOK MAIN\n//!BIND HOOKED\nvec4 hook() { return HOOKED_tex(HOOKED_pos); }';
+  const entry = await saveLibraryShader({ id: '', name: 'Portable', path: '', description: '', categories: ['Custom'], scale: 1, builtin: false, code });
+  const oldPath = entry.path.replace(root, '/previous-install/data');
+  const data = await fs.readJson(path.join(root, 'shaders', 'library.json'));
+  data[0].path = oldPath;
+  await fs.writeJson(path.join(root, 'shaders', 'library.json'), data);
+  expect((await chooseLibraryShader(entry.id)).path).toBe(entry.path);
+});

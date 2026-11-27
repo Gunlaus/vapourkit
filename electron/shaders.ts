@@ -60,10 +60,18 @@ function validateParameter(parameter: ShaderParameter, value: number): void {
     throw new Error(`Shader parameter ${parameter.name} is outside its declared type or range.`);
   }
 }
+/** Internal shader snapshots remain usable when a portable data folder moves. */
+export function ownedShaderPath(file: string): string {
+  const snapshot = /(?:^|[\\/])nvencc[\\/]shader-cache[\\/]([a-f0-9]{64})[\\/]shader\.glsl$/i.exec(file);
+  if (!snapshot) return file;
+  const current = path.join(PATHS.APP_DATA, 'nvencc', 'shader-cache', snapshot[1], 'shader.glsl');
+  return fs.existsSync(current) ? current : file;
+}
+
 export function shaderSource(settings: ShaderSettings): string {
   validateShaderSettings(settings);
   const preset = SHADER_PRESETS.find(p => p.id === settings.presetId);
-  return preset ? path.join(getBundledBasePath(), 'include', 'shaders', preset.file) : settings.path;
+  return preset ? path.join(getBundledBasePath(), 'include', 'shaders', preset.file) : ownedShaderPath(settings.path);
 }
 async function shaderBytes(file: string): Promise<Buffer> {
   if (path.extname(file).toLowerCase() !== '.glsl') throw new Error('Choose a .glsl shader file.');

@@ -4,12 +4,12 @@ import { randomUUID } from 'crypto';
 import { PATHS } from './constants';
 import { getBundledBasePath } from './utils';
 import { SHADER_PRESETS, type ShaderLibraryEntry, type ShaderSettings } from './shaderTypes';
-import { inspectShader, prepareShader } from './shaders';
+import { inspectShader, prepareShader, ownedShaderPath } from './shaders';
 import { JsonFileWriter } from './jsonFile';
 const store = () => path.join(PATHS.APP_DATA, 'shaders', 'library.json');
 const writer = new JsonFileWriter(store);
 async function custom(): Promise<ShaderLibraryEntry[]> {
-  try { const data = await fs.readJson(store()); return Array.isArray(data) ? data : []; }
+  try { const data = await fs.readJson(store()); return Array.isArray(data) ? data.map((entry: ShaderLibraryEntry) => ({ ...entry, path: ownedShaderPath(entry.path) })) : []; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
 }
 export async function listShaders(): Promise<ShaderLibraryEntry[]> {
