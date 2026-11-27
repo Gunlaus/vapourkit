@@ -22,6 +22,47 @@ ADAPTER = 'rgb-window-v1'
 ENGINE_ABI = 1
 _IDENTITY = None
 
+# Exact bundled export with an even-only input pad before a stride-2/window-8
+# attention stage. Never identify an export repair from a filename alone.
+FDAT_PAD16_SHA256 = '99961e059c40166c8f4ecd99519f35228de317eea8788826540f8b7a34c0bfa6'
+FDAT_PAD16_ADAPTER = 'bndl-fdat-v1.5-pad16-v1'
+
+
+def known_export_adapter(source):
+    source = Path(source)
+    if source.stat().st_size == 16524657 and digest(source) == FDAT_PAD16_SHA256:
+        return FDAT_PAD16_ADAPTER
+    return None
+
+
+def adapt_known_export(model, adapter):
+    """Repair one fingerprinted export's shape plumbing; keep weights/types intact.
+
+    FDAT's existing output Slice already crops the padded result to 2x the
+    original dimensions. Only replace its even-only input padding calculation.
+    At dimensions divisible by 16 this adds zero padding and preserves outputs.
+    """
+    if adapter is None: return
+    if adapter != FDAT_PAD16_ADAPTER: raise ValueError('Unknown model export adapter: ' + str(adapter))
+    import onnx
+    prefix = '__vk_fdat_pad16_'
+    pads = [n for n in model.graph.node if n.op_type == 'Pad' and n.input[0] == 'input']
+    if len(pads) != 1 or any(name.startswith(prefix) for n in model.graph.node for name in n.output):
+        raise RuntimeError('The fingerprinted FDAT graph does not match its input-padding adapter.')
+    pad = pads[0]
+    for name, values in [('axes', [2, 3]), ('multiple', [16]), ('zeros', [0] * 6)]:
+        model.graph.initializer.append(onnx.helper.make_tensor(prefix + name, onnx.TensorProto.INT64, [len(values)], values))
+    nodes = [
+        onnx.helper.make_node('Shape', ['input'], [prefix + 'shape']),
+        onnx.helper.make_node('Gather', [prefix + 'shape', prefix + 'axes'], [prefix + 'hw'], axis=0),
+        onnx.helper.make_node('Neg', [prefix + 'hw'], [prefix + 'negative']),
+        onnx.helper.make_node('Mod', [prefix + 'negative', prefix + 'multiple'], [prefix + 'bottom_right']),
+        onnx.helper.make_node('Concat', [prefix + 'zeros', prefix + 'bottom_right'], [prefix + 'pads'], axis=0),
+    ]
+    position = list(model.graph.node).index(pad)
+    pad.input[1] = prefix + 'pads'
+    for node in reversed(nodes): model.graph.node.insert(position, node)
+
 
 @contextmanager
 def engine_build_lock(engine, timeout=1800):
@@ -470,6 +511,10 @@ def load_model(clips, engine_path, streams, use_cuda_graph=False, **_unused):
         clips = temporal_window(first, channels // 3) if channels > 3 else [first]
     descriptor = model_descriptor(source_model(engine_path, manifest))
     multiple = descriptor.get('spatialMultiple', 1)
+    if manifest and manifest.get('sourceAdaptation', {}).get('id') == FDAT_PAD16_ADAPTER:
+        # This engine pads and crops internally, using the export's reflect mode.
+        # Do not add another, zero-padded border from legacy model metadata.
+        multiple = 1
     if not isinstance(multiple, int) or not 1 <= multiple <= 256: raise RuntimeError('Invalid model spatial multiple in ' + str(engine_path) + '.')
     original = (first.width, first.height)
     if first.width % multiple or first.height % multiple:

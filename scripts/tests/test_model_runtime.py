@@ -310,6 +310,22 @@ class ModelRuntimeTests(unittest.TestCase):
             output = runtime.load_model(Clip(width=721, height=480), engine, 2)
         self.assertEqual((output.width, output.height), (1442, 960))
 
+    def test_internally_adapted_engine_does_not_get_a_second_zero_padded_border(self):
+        source = self.root / 'fdat.onnx'; model(source)
+        Path(str(source) + '.contract.json').write_text(json.dumps({'spatialMultiple': 16, 'scale': 2}))
+        engine = self.engine(source='fdat.onnx')
+        sidecar = Path(str(engine) + '.json')
+        metadata = json.loads(sidecar.read_text())
+        metadata['sourceAdaptation'] = {'id': runtime.FDAT_PAD16_ADAPTER}
+        sidecar.write_text(json.dumps(metadata))
+        Clip = types.SimpleNamespace
+        def run(clips, *args):
+            self.assertEqual((clips[0].width, clips[0].height), (721, 480))
+            return Clip(width=1442, height=960)
+        with patch.object(runtime, 'raw_model', side_effect=run):
+            output = runtime.load_model(Clip(width=721, height=480), engine, 2)
+        self.assertEqual((output.width, output.height), (1442, 960))
+
     def test_temporal_window_follows_the_engine_channel_count(self):
         engine = self.engine('vsr_fp16.engine', channels=15)
         centre = types.SimpleNamespace(width=640, height=480)
@@ -400,6 +416,91 @@ class ModelRuntimeTests(unittest.TestCase):
                 runtime.reference_output(self.root / 'model.onnx', 'input', 'output', np.zeros((1,3,4,4),np.float32))
             self.assertEqual(failure.exception.kind, 'reference-failed')
             self.assertIn('onnxruntime', failure.exception.report['details'])
+
+
+
+FDAT_SOURCE = ROOT / 'include' / 'models' / '2x_bndl_animefilm_v1.5_FDAT_fp32.onnx'
+
+@unittest.skipUnless(FDAT_SOURCE.is_file(), 'Bundled FDAT fixture is excluded by sparse checkout')
+class KnownExportAdapterTests(unittest.TestCase):
+    def session(self, graph):
+        import onnxruntime as ort
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = 2
+        options.inter_op_num_threads = 1
+        options.log_severity_level = 4
+        return ort.InferenceSession(graph.SerializeToString(), sess_options=options, providers=['CPUExecutionProvider'])
+
+    def test_exact_export_failure_and_padding_repair_against_original_reference(self):
+        original_bytes = FDAT_SOURCE.read_bytes()
+        original = onnx.load(FDAT_SOURCE)
+        adapted = onnx.load(FDAT_SOURCE)
+        adapter_id = runtime.known_export_adapter(FDAT_SOURCE)
+        self.assertEqual(adapter_id, runtime.FDAT_PAD16_ADAPTER)
+        runtime.adapt_known_export(adapted, adapter_id)
+        onnx.checker.check_model(adapted)
+        before, after = self.session(original), self.session(adapted)
+        rng = np.random.default_rng(12)
+        for h, w in [(16, 16), (24, 32), (32, 24), (40, 48), (41, 47)]:
+            data = rng.uniform(.1, .9, [1, 3, h, w]).astype(np.float32)
+            if h == w == 16:
+                expected = before.run(None, {'input': data})[0]
+            else:
+                with self.assertRaisesRegex(Exception, 'Reshape'):
+                    before.run(None, {'input': data})
+                padded = np.pad(data, ((0, 0), (0, 0), (0, (-h) % 16), (0, (-w) % 16)), mode='reflect')
+                expected = before.run(None, {'input': padded})[0][:, :, :h * 2, :w * 2]
+            actual = after.run(None, {'input': data})[0]
+            self.assertEqual(actual.shape, (1, 3, h * 2, w * 2))
+            self.assertTrue(np.isfinite(actual).all())
+            np.testing.assert_allclose(actual, expected, atol=1e-5, rtol=1e-5)
+        # Learned tensors, their data types, and the original source are unchanged.
+        original_weights = {v.name: v.SerializeToString() for v in original.graph.initializer}
+        adapted_weights = {v.name: v.SerializeToString() for v in adapted.graph.initializer}
+        self.assertTrue(all(adapted_weights[k] == v for k, v in original_weights.items()))
+        self.assertEqual(FDAT_SOURCE.read_bytes(), original_bytes)
+
+    def test_name_is_not_used_to_identify_an_export(self):
+        with tempfile.TemporaryDirectory() as folder:
+            renamed = Path(folder) / 'renamed.onnx'
+            renamed.write_bytes(FDAT_SOURCE.read_bytes())
+            self.assertEqual(runtime.known_export_adapter(renamed), runtime.FDAT_PAD16_ADAPTER)
+            changed = bytearray(renamed.read_bytes()); changed[-1] ^= 1
+            renamed.write_bytes(changed)
+            self.assertIsNone(runtime.known_export_adapter(renamed))
+
+    def test_builder_uses_private_adaptation_and_keeps_original_source_provenance(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / 'fdat.engine'
+            used = []
+            def build_candidate(opts, report):
+                used.append(Path(opts['onnx']))
+                self.assertNotEqual(used[-1], FDAT_SOURCE)
+                graph = onnx.load(used[-1])
+                self.assertTrue(any(n.output[0] == '__vk_fdat_pad16_pads' for n in graph.graph.node))
+                Path(opts['save_engine']).write_bytes(b'fixture engine')
+                return 0, {'schema': 1, 'validation': {}}
+            with patch.dict(sys.modules, {'tensorrt': types.SimpleNamespace()}), patch.object(builder, 'build_validated_candidate', build_candidate):
+                status = builder.main(['--vkAdapter=rgb-window-v1', '--onnx=' + str(FDAT_SOURCE), '--saveEngine=' + str(target)])
+            self.assertEqual(status, 0)
+            metadata = json.loads(Path(str(target) + '.json').read_text())
+            self.assertEqual((target.parent / metadata['sourceRelative']).resolve(), FDAT_SOURCE.resolve())
+            self.assertEqual(metadata['sourceAdaptation']['id'], runtime.FDAT_PAD16_ADAPTER)
+            self.assertFalse(used[0].exists())
+
+    def test_native_adapter_keeps_fp32_and_matches_padded_reference(self):
+        import prepare_nvencc_model as native
+        with tempfile.TemporaryDirectory() as folder:
+            prepared = native.prepare(FDAT_SOURCE, Path(folder) / 'cache')
+            self.assertEqual(prepared['sourceAdaptation'], runtime.FDAT_PAD16_ADAPTER)
+            graph = onnx.load(prepared['model'])
+            session = self.session(graph)
+            original = self.session(onnx.load(FDAT_SOURCE))
+            data = np.full([1, 3, 24, 32], .25, np.float32)
+            expected = original.run(None, {'input': np.pad(data, ((0, 0), (0, 0), (0, 8), (0, 0)), mode='reflect')})[0][:, :, :48, :64]
+            actual = session.run(None, {session.get_inputs()[0].name: data})[0]
+            np.testing.assert_allclose(actual, expected, atol=1e-5, rtol=1e-5)
+            self.assertEqual(native.prepare(FDAT_SOURCE, Path(folder) / 'cache')['model'], prepared['model'])
 
 
 if __name__ == '__main__': unittest.main()

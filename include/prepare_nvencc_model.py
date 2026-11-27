@@ -7,9 +7,14 @@ import os
 from pathlib import Path
 import shutil
 import tempfile
+import sys
 
 import onnx
 from onnx import TensorProto, helper
+
+# Embedded Python's isolated path excludes application-owned sibling modules.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from vk_model_runtime import known_export_adapter, adapt_known_export
 
 VERSION = 1
 
@@ -42,6 +47,8 @@ def tensors(graph):
 def prepare(source, cache):
     source, cache = Path(source).resolve(), Path(cache)
     graph = onnx.load_model(source, load_external_data=False)
+    source_adapter = known_export_adapter(source)
+    adapt_known_export(graph, source_adapter)
     initializers = {t.name for t in graph.graph.initializer}
     inputs = [v for v in graph.graph.input if v.name not in initializers]
     outputs = list(graph.graph.output)
@@ -56,7 +63,8 @@ def prepare(source, cache):
             if not location or not file.is_relative_to(source.parent):
                 raise ValueError('External weights must stay inside the model package.')
             files[str(file)] = [file.stat().st_size, file.stat().st_mtime_ns]
-    key = hashlib.sha256(json.dumps([VERSION, files], sort_keys=True).encode()).hexdigest()[:24]
+    identity = [VERSION, files, source_adapter] if source_adapter else [VERSION, files]
+    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
     target = cache / key
     existing = ready(target)
     if existing: return {**existing, 'model': str(target / 'model.onnx')}
@@ -112,6 +120,7 @@ def prepare(source, cache):
         onnx.checker.check_model(str(stage / 'model.onnx'))
         result = {'schema': VERSION, 'source': str(source), 'inputShape': shapes[0], 'outputShape': shapes[1],
                   'files': [p.name for p in stage.iterdir() if p.is_file()]}
+        if source_adapter: result['sourceAdaptation'] = source_adapter
         result['signatures'] = {p.name: [p.stat().st_size, p.stat().st_mtime_ns] for p in stage.iterdir() if p.is_file()}
         (stage / 'ready.json').write_text(json.dumps(result), encoding='utf-8')
         if ready(target): shutil.rmtree(stage)

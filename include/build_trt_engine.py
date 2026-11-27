@@ -1644,7 +1644,7 @@ def build_validated_candidate(opts, report_path):
     from vk_model_runtime import validate_engine, EngineValidationError, graph_contract
     attempts = []
     def write_report(status):
-        try: atomic_write_bytes(report_path, json.dumps({'schema': 1, 'source': opts['onnx'], 'status': status, 'attempts': attempts}, indent=2).encode())
+        try: atomic_write_bytes(report_path, json.dumps({'schema': 1, 'source': opts.get('_original_onnx', opts['onnx']), 'sourceAdaptation': opts.get('_source_adapter'), 'status': status, 'attempts': attempts}, indent=2).encode())
         except OSError as error: print('Warning: could not save validation report: ' + str(error), file=sys.stderr)
     for attempt in range(2):
         status = build(opts)
@@ -1728,11 +1728,36 @@ def main(argv):
         # Two builds of one engine (another window, a retry) take turns.
         from vk_model_runtime import engine_build_lock
         locks.enter_context(engine_build_lock(target))
+        original_source = opts['onnx']
+        from vk_model_runtime import known_export_adapter, adapt_known_export
+        source_adapter = known_export_adapter(original_source)
+        if source_adapter:
+            import tempfile
+            import onnx
+            folder = Path(locks.enter_context(tempfile.TemporaryDirectory(prefix='vk-model-adapter-')))
+            adapted = folder / 'model.onnx'
+            model = onnx.load(original_source)
+            adapt_known_export(model, source_adapter)
+            onnx.checker.check_model(model)
+            onnx.save_model(model, adapted)
+            opts['_original_onnx'] = original_source
+            opts['_source_adapter'] = source_adapter
+            opts['onnx'] = str(adapted)
+            report_status('Applying verified FDAT input-padding adapter; original model and precision stay unchanged.')
         candidate = target + '.candidate-' + str(os.getpid())
         opts['save_engine'] = candidate
         try:
             status, manifest = build_validated_candidate(opts, target + '.validation-report.json')
             if status: return status
+            if source_adapter:
+                from vk_model_runtime import digest
+                manifest['sourceRelative'] = os.path.relpath(original_source, Path(target).parent)
+                original_sha = digest(original_source)
+                manifest['sourceAdaptation'] = {'id': source_adapter, 'originalSha256': original_sha, 'preparedSha256': digest(opts['onnx'])}
+                if 'contract' in manifest:
+                    # The derivative is private and temporary; preserve a usable
+                    # source identity and record its precise transformation above.
+                    manifest['contract']['files'] = [{'path': str(Path(original_source).resolve()), 'sha256': original_sha}]
             # The working engine remains untouched until real frame inference passes.
             metadata_candidate = candidate + '.json'
             atomic_write_bytes(metadata_candidate, json.dumps(manifest, indent=2).encode())

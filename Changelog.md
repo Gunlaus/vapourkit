@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Experimental GPU video pipeline
+- Repair the fingerprinted bundled FDAT v1.5 export's input alignment in a private derivative for both engine builders, preserving reflection padding, FP32 weights and source files.
 - Add an optional Windows x64 NVEncC backend for full-video, single RGB image-model workflows with Simple NVIDIA encoding settings. The standard VapourSynth path remains the default.
 - Install checksum-pinned native dependencies in an isolated folder; cache FP32-boundary ONNX adapters without editing source models or changing their internal weights.
 - Preserve selected audio/subtitle tracks and subtitle attachments, check the completed output before publication, and report native throughput and whether GPU tensor sharing was confirmed.
