@@ -3,6 +3,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  getNvencRuntimeStatus: () => ipcRenderer.invoke('nvencc-runtime-status'),
+  installNvencRuntime: () => ipcRenderer.invoke('nvencc-runtime-install'),
+  clearNvencEngineCache: () => ipcRenderer.invoke('nvencc-clear-engine-cache'),
   setPipelineSettings: (settings: import('./pipelineSettings').PipelineSettings) => ipcRenderer.invoke('set-pipeline-settings', settings),
   setPreviewEnabled: (enabled: boolean) => ipcRenderer.invoke('set-preview-enabled', enabled),
   // Dependency management

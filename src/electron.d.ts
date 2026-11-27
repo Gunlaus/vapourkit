@@ -56,6 +56,9 @@ export interface ElectronAPI {
   installRepositoryFilter: (id: string) => Promise<{ message: string }>;
   checkEncodingSupport: (request: { encoder: import('../electron/encodingSupportTypes').NvencEncoder; pixelFormat: string }) => Promise<import('../electron/encodingSupportTypes').EncodingSupport>;
   getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
+  getNvencRuntimeStatus: () => Promise<import('../electron/nvencTypes').NvencRuntimeStatus>;
+  installNvencRuntime: () => Promise<import('../electron/nvencTypes').NvencRuntimeStatus>;
+  clearNvencEngineCache: () => Promise<void>;
   setPipelineSettings: (settings: import('../electron/pipelineSettings').PipelineSettings) => Promise<void>;
   setPreviewEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
   listCatalogModels: () => Promise<import('../electron/componentCatalog').ComponentSnapshot>;

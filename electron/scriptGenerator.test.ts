@@ -241,7 +241,7 @@ describe('inference backend selection', () => {
     const templatePath = path.join(testRoot, 'data', 'config', 'vapoursynth_template.vpy');
     const before = await fs.readFile(templatePath, 'utf-8');
     const script = await generate([aiFilter(0, 'C:/models/m.engine')], false, undefined, 2, 'win32', {
-      previewHeight: 720, previewFps: 1, trtCudaGraphs: false, cpuThreads: 6, cacheMiB: 2048, frameRequests: 4,
+      executionBackend: 'vapoursynth', previewHeight: 720, previewFps: 1, trtCudaGraphs: false, cpuThreads: 6, cacheMiB: 2048, frameRequests: 4,
     });
     expect(script).toContain('use_cuda_graph=False');
     expect(script).toContain('core.num_threads = 6');

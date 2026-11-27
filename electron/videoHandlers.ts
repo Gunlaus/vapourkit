@@ -1,4 +1,5 @@
 import { nvencPreflight } from './nvencPreflight';
+import { NvencExecutor } from './nvencExecutor';
 import { nvencEncoderOf } from './encodingSupport';
 import { setPreviewEnabled } from './previewSettings';
 import { ipcMain, BrowserWindow, shell, dialog, MessageChannelMain, type MessagePortMain } from 'electron';
@@ -37,7 +38,7 @@ import {
 
 /** A processing run: its executor and its per-item log. */
 interface UpscaleJob {
-  executor: UpscaleExecutor;
+  executor: UpscaleExecutor | NvencExecutor;
   log: QueueItemLogger;
 }
 
@@ -51,7 +52,7 @@ interface UpscaleStop {
  * Runs that were cancelled and are letting ffmpeg finish what it has. Quitting
  * kills them; each leaves the set when its run settles.
  */
-const drainingUpscales = new Set<UpscaleExecutor>();
+const drainingUpscales = new Set<UpscaleExecutor | NvencExecutor>();
 
 const upscaleJob = new JobSlot<UpscaleJob, UpscaleStop>((job, { mode, note }) => {
   job.log.write(note);
@@ -348,7 +349,8 @@ export function registerVideoHandlers(
 
       const vspipePath = dependencyManager.getVSPipePath();
       const pythonPath = dependencyManager.getPythonExecutablePath();
-      const executor = new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
+      const nativeRequested = configManager.getPipelineSettings?.().executionBackend === 'nvencc';
+      const executor = nativeRequested ? new NvencExecutor(mainWindow, pythonPath) : new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
 
       // The job is in the slot from here on, so a cancel at any later await
       // reaches it. Any previous run, and any validation, is stopped first.
@@ -396,6 +398,16 @@ export function registerVideoHandlers(
       let temporaryScript: string | null = null;
       try {
         executor.onDiagnostic = message => itemLogger.write(message);
+        if (executor instanceof NvencExecutor) {
+          qlog('Execution backend: NVEncC GPU (experimental)');
+          if (!isUpscaling) throw new Error('Enable AI upscaling to test the NVEncC GPU path, or select VapourSynth execution.');
+          await executor.execute({ inputPath: videoPath, outputPath, filters: filters ?? [], defaultBackend,
+            encoding: configManager.getEncodingSettings(), processingFormat: configManager.getProcessingFormat(),
+            colorimetry: configManager.getColorimetrySettings(), segment, benchmark: benchmarkMode },
+            file => configManager.isModelFp32(file), file => configManager.getModelType(file));
+          qlog('Processing completed successfully');
+          return { success: true, outputPath };
+        }
         const nvenc = nvencEncoderOf(configManager.getFfmpegArgs());
         if (nvenc && !benchmarkMode) {
           const ffmpeg = FFmpegManager.getFFmpegPath();
@@ -489,6 +501,9 @@ export function registerVideoHandlers(
           itemLogger.error(`Processing failed: ${errorMsg}`);
         } else {
           qerror(`Processing failed: ${errorMsg}`);
+          if (executor instanceof NvencExecutor && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('upscale-progress', {
+            type: 'error', currentFrame: 0, totalFrames: 0, fps: 0, percentage: 0, message: errorMsg,
+          });
         }
         return { success: false, error: executor.isStopped ? 'Canceled' : errorMsg };
       } finally {

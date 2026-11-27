@@ -1,4 +1,5 @@
 import { pipelineSettingsSchema } from './pipelineSettings';
+import { installNvencRuntime, nvencRuntimeStatus, clearNvencEngineCache } from './nvencRuntime';
 import { handleValidated } from './ipcValidation';
 import { ipcMain, BrowserWindow, app } from 'electron';
 import * as fs from 'fs-extra';
@@ -18,6 +19,9 @@ let lastLogSize = 0;
  * Registers all configuration-related IPC handlers
  */
 export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
+  ipcMain.handle('nvencc-runtime-status', () => nvencRuntimeStatus());
+  ipcMain.handle('nvencc-runtime-install', () => installNvencRuntime());
+  ipcMain.handle('nvencc-clear-engine-cache', () => clearNvencEngineCache());
   ipcMain.handle('get-pipeline-settings', () => configManager.getPipelineSettings());
   handleValidated('set-pipeline-settings', pipelineSettingsSchema, settings => configManager.setPipelineSettings(settings));
   ipcMain.handle('get-colorimetry-settings', async () => {

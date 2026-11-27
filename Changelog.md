@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Experimental GPU video pipeline
+- Add an optional Windows x64 NVEncC backend for full-video, single RGB image-model workflows with Simple NVIDIA encoding settings. The standard VapourSynth path remains the default.
+- Install checksum-pinned native dependencies in an isolated folder; cache FP32-boundary ONNX adapters without editing source models or changing their internal weights.
+- Preserve selected audio/subtitle tracks and subtitle attachments, check the completed output before publication, and report native throughput and whether GPU tensor sharing was confirmed.
+- Save valid processing-performance settings automatically, including when closing the settings panel.
+
 ### Processing performance
 - Enable TensorRT CUDA Graph replay with a normal-inference fallback when graph setup is unsupported, and a switch for comparison or troubleshooting.
 - Limit encoding-preview generation by elapsed time before scaling and JPEG compression; keep output encoding settings unchanged.

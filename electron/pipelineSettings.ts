@@ -1,5 +1,6 @@
 import { z } from 'zod';
 export const pipelineSettingsSchema = z.object({
+  executionBackend: z.enum(['vapoursynth', 'nvencc']).default('vapoursynth'),
   previewHeight: z.number().int().min(180).max(1080).default(720),
   previewFps: z.number().min(0.1).max(5).default(1),
   trtCudaGraphs: z.boolean().default(true),
