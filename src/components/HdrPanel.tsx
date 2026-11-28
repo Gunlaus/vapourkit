@@ -26,13 +26,9 @@ export function HdrPanel({ settings, disabled, onChange }: {
       <label className="block">Target peak<select aria-label="HDR target peak" className={input} value={hdr.peakNits} onChange={e => update({ peakNits: Number(e.target.value) })}>
         {[600,1000,2000,4000,...(![600,1000,2000,4000].includes(hdr.peakNits) ? [hdr.peakNits] : [])].map(value => <option key={value} value={value}>{value} nits</option>)}
       </select></label>
-      <label className="block">Highlight expansion<input aria-label="HDR highlight expansion" className="ml-2 align-middle" type="range" min="0" max="1" step="0.01" value={hdr.strength} onChange={e => update({ strength: Number(e.target.value), preset: 'custom' })} /> {Math.round(hdr.strength * 100)}%</label>
+      {hdr.preset === 'custom' && <label className="block">Highlight expansion<input aria-label="HDR highlight expansion" className="ml-2 align-middle" type="range" min="0" max="1" step="0.01" value={hdr.strength} onChange={e => update({ strength: Number(e.target.value), preset: 'custom' })} /> {Math.round(hdr.strength * 100)}%</label>}
       <label className="flex items-center gap-2"><input type="checkbox" checked={hdr.chroma === 'auto'} onChange={e => update({ chroma: e.target.checked ? 'auto' : 'off' })} />Reconstruct subsampled chroma</label>
-      <p className="text-ink-500">HEVC/AV1 · PQ / BT.2020 · 10-bit. Preview is tone-mapped to SDR.</p>
-      <details><summary className="cursor-pointer">Advanced</summary><div className="mt-2 space-y-2">
-        <label className="block">Reference white<input aria-label="HDR reference white" className={input + ' w-20'} type="number" min="80" max="300" value={hdr.referenceWhite} onChange={e => update({ referenceWhite: Number(e.target.value), preset: 'custom' })} /> nits</label>
-
-      </div></details>
+      <label className="block">Reference white<input aria-label="HDR reference white" className={input + ' w-20'} type="number" min="80" max="300" value={hdr.referenceWhite} onChange={e => update({ referenceWhite: Number(e.target.value) })} /> nits</label>
       {error && <p role="alert" className="text-bad-400">{error}</p>}
     </fieldset>
   </Section>;
