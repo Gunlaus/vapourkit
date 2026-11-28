@@ -37,6 +37,12 @@ not identify specular highlights, recover clipped detail or protect baked-in
 subtitle whites semantically. Reference white is the baseline scale, not a
 guarantee that every diffuse white stays at that luminance after expansion.
 
+While HDR is active, Source color replaces the combined legacy override with
+independent input matrix, primaries, transfer and range controls. Auto honors
+source tags; missing values use the existing SDR defaults. The resolved values
+are logged with `[hdr-source]`. The legacy combined override is bypassed so it
+cannot overwrite these decisions.
+
 The first path uses VapourSynth with existing CPU/NVIDIA/AMD/Intel encoding
 options. NVEncC's shader bypass is disabled for HDR so it cannot omit conversion.
 No mastering-display or content-light values are fabricated from the peak slider.

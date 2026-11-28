@@ -6,6 +6,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      hdr_smoke:
+        description: Validate HDR on the Windows VapourSynth R79 runtime
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,6 +49,20 @@ jobs:
           python -m unittest discover -s scripts/tests -p test_model_runtime.py -v
           python -m unittest discover -s scripts/tests -p test_nvencc_model.py -v
           python -m unittest discover -s scripts/tests -p test_rtx_runtime.py -v
+
+
+      - uses: actions/setup-python@v5
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.hdr_smoke && matrix.os == 'windows-latest' }}
+        with:
+          python-version: '3.13'
+      - name: Verify HDR on the target VapourSynth CPU runtime
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.hdr_smoke && matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/vapoursynth/vapoursynth/releases/download/R79/VapourSynth64-Portable-R79.zip' -OutFile "$env:RUNNER_TEMP/vs79.zip"
+          Expand-Archive "$env:RUNNER_TEMP/vs79.zip" "$env:RUNNER_TEMP/vs79"
+          python -m pip install "$env:RUNNER_TEMP/vs79/wheel/vapoursynth-79-cp312-abi3-win_amd64.whl"
+          python scripts/test_hdr_vapoursynth.py
 
   package-linux:
     name: Package Linux AppImage

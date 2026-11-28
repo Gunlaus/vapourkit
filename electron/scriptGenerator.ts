@@ -378,7 +378,7 @@ export class VapourSynthScriptGenerator {
     const defaultBackend = normalizeBackendForPlatform(config.defaultBackend, this.platform);
 
     // Apply colorimetry settings
-    const overwriteMatrix = config.colorimetry?.overwriteMatrix ? 'True' : 'False';
+    const overwriteMatrix = !config.colorimetry?.hdr?.enabled && config.colorimetry?.overwriteMatrix ? 'True' : 'False';
     const matrix709 = config.colorimetry?.matrix709 ? 'True' : 'False';
     const defaultMatrix = config.colorimetry?.defaultMatrix || '709';
     const defaultPrimaries = config.colorimetry?.defaultPrimaries || '709';

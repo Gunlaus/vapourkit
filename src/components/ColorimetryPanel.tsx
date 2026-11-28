@@ -1,3 +1,4 @@
+import { DEFAULT_HDR, type HdrSettings } from '../../electron/hdrSettings';
 // src/components/ColorimetryPanel.tsx
 import { memo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
@@ -32,6 +33,34 @@ export const ColorimetryPanel = memo<ColorimetryPanelProps>(({
     }
     onSettingsChange({ ...settings, overwriteMatrix: checked });
   };
+
+  if (settings.hdr?.enabled) {
+    const hdr = { ...DEFAULT_HDR, ...settings.hdr };
+    const update = (change: Partial<HdrSettings>) => onSettingsChange({ ...settings, hdr: { ...hdr, ...change } });
+    const custom = [hdr.sourceMatrix, hdr.sourcePrimaries, hdr.sourceRange, hdr.sourceTransfer].some(value => value && value !== 'auto');
+    const select = 'w-full h-7 bg-ink-850 border border-ink-750 rounded px-2 text-xs';
+    return <Section title="Source color" meta={custom ? 'overrides' : 'Auto'} collapsible open={isExpanded} onToggle={() => setIsExpanded(!isExpanded)}>
+      <fieldset disabled={isProcessing} className="px-3 py-3 text-xs space-y-3">
+        <p className="text-ink-400">{videoInfo?.colorSpace ? `Detected: ${videoInfo.colorSpace}` : 'Unspecified SDR tags use the configured BT.709/BT.601 defaults.'}</p>
+        <p className="text-ink-500">Output is managed separately: PQ / BT.2020 / 10-bit.</p>
+        <details open={custom || undefined}><summary className="cursor-pointer">Advanced source overrides</summary><div className="mt-2 space-y-2">
+          <label className="block">Matrix<select aria-label="HDR source matrix" className={select} disabled={isProcessing || isRgbFormat} value={hdr.sourceMatrix ?? 'auto'} onChange={e => update({ sourceMatrix: e.target.value as HdrSettings['sourceMatrix'] })}>
+            <option value="auto">Auto — metadata</option><option value="709">BT.709</option><option value="170m">BT.601 / SMPTE 170M</option><option value="470bg">BT.470BG</option>
+          </select></label>
+          <label className="block">Primaries<select aria-label="HDR source primaries" className={select} value={hdr.sourcePrimaries ?? 'auto'} onChange={e => update({ sourcePrimaries: e.target.value as HdrSettings['sourcePrimaries'] })}>
+            <option value="auto">Auto — metadata</option><option value="709">BT.709</option><option value="170m">SMPTE 170M</option><option value="470bg">BT.470BG</option>
+          </select></label>
+          <label className="block">Transfer<select aria-label="HDR source transfer" className={select} value={hdr.sourceTransfer} onChange={e => update({ sourceTransfer: e.target.value as HdrSettings['sourceTransfer'] })}>
+            <option value="auto">Auto — metadata</option><option value="709">BT.709</option><option value="gamma24">Display gamma 2.4</option><option value="srgb">sRGB</option>
+          </select></label>
+          <label className="block">Range<select aria-label="HDR source range" className={select} value={hdr.sourceRange ?? 'auto'} onChange={e => update({ sourceRange: e.target.value as HdrSettings['sourceRange'] })}>
+            <option value="auto">Auto — metadata</option><option value="limited">Limited</option><option value="full">Full</option>
+          </select></label>
+          {custom && <button type="button" className="text-accent-400" onClick={() => update({ sourceMatrix: 'auto', sourcePrimaries: 'auto', sourceRange: 'auto', sourceTransfer: 'auto' })}>Reset to Auto</button>}
+        </div></details>
+      </fieldset>
+    </Section>;
+  }
 
   return (
     <Section

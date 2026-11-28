@@ -31,9 +31,7 @@ export function HdrPanel({ settings, disabled, onChange }: {
       <p className="text-ink-500">HEVC/AV1 · PQ / BT.2020 · 10-bit. Preview is tone-mapped to SDR.</p>
       <details><summary className="cursor-pointer">Advanced</summary><div className="mt-2 space-y-2">
         <label className="block">Reference white<input aria-label="HDR reference white" className={input + ' w-20'} type="number" min="80" max="300" value={hdr.referenceWhite} onChange={e => update({ referenceWhite: Number(e.target.value), preset: 'custom' })} /> nits</label>
-        <label className="block">SDR transfer<select className={input} value={hdr.sourceTransfer} onChange={e => update({ sourceTransfer: e.target.value as HdrSettings['sourceTransfer'] })}>
-          <option value="auto">From metadata (BT.709 if missing)</option><option value="709">BT.709</option><option value="gamma24">Display gamma 2.4</option><option value="srgb">sRGB</option>
-        </select></label>
+
       </div></details>
       {error && <p role="alert" className="text-bad-400">{error}</p>}
     </fieldset>

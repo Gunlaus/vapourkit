@@ -8,6 +8,9 @@ export const hdrSettingsSchema = z.object({
   referenceWhite: z.number().finite().min(80).max(300).default(203),
   strength: z.number().finite().min(0).max(1).default(0.35),
   chroma: z.enum(['auto', 'off']).default('auto'),
+  sourceMatrix: z.enum(['auto', '709', '170m', '470bg']).optional(),
+  sourcePrimaries: z.enum(['auto', '709', '170m', '470bg']).optional(),
+  sourceRange: z.enum(['auto', 'limited', 'full']).optional(),
   sourceTransfer: z.enum(['auto', '709', 'srgb', 'gamma24']).default('auto'),
 }).refine(value => value.referenceWhite < value.peakNits, 'HDR reference white must be below the target peak.');
 export type HdrSettings = z.infer<typeof hdrSettingsSchema>;

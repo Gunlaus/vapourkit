@@ -38,19 +38,22 @@ def prepare_source(clip, settings, defaults):
         raise ValueError('HDR conversion requires a constant input format.')
     matrix_default = 1 if defaults['defaultMatrix'] == '709' else 6
     primaries_default = 1 if defaults['defaultPrimaries'] == '709' else 6
-    matrix = props.get('_Matrix', matrix_default)
-    primaries = props.get('_Primaries', primaries_default)
-    transfer = props.get('_Transfer', 1)
+    codes = {'709': 1, '470bg': 5, '170m': 6}
+    matrix = codes.get(settings.get('sourceMatrix'), props.get('_Matrix', matrix_default))
+    primaries = codes.get(settings.get('sourcePrimaries'), props.get('_Primaries', primaries_default))
+    transfer = {'709': 1, 'srgb': 13, 'gamma24': 1}.get(settings.get('sourceTransfer'), props.get('_Transfer', 1))
     if matrix == 2: matrix = matrix_default
     if primaries == 2: primaries = primaries_default
     if transfer == 2: transfer = 1
     if matrix not in (0, 1, 5, 6) or primaries not in (1, 5, 6) or transfer not in (1, 6, 13):
         raise ValueError('This HDR baseline supports BT.709/BT.601 SDR or sRGB. Correct source color metadata first.')
     color_range = props.get('_ColorRange', 0 if clip.format.color_family == vs.RGB else 1)
+    color_range = {'limited': 1, 'full': 0}.get(settings.get('sourceRange'), color_range)
     if color_range not in (0, 1):
         raise ValueError('Unrecognized source color range for HDR conversion.')
     tags = dict(_Primaries=primaries, _Transfer=transfer, _ColorRange=color_range)
     if clip.format.color_family != vs.RGB: tags['_Matrix'] = matrix
+    print(f'[hdr-source] matrix={matrix}, primaries={primaries}, transfer={transfer}, range={color_range}; missing SDR tags use configured defaults.')
     clip = core.std.SetFrameProps(clip, **tags)
     if settings['chroma'] == 'auto' and clip.format.color_family == vs.YUV and (
             clip.format.subsampling_w or clip.format.subsampling_h):
