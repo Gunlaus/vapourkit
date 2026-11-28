@@ -82,3 +82,22 @@ The current CPU tests cover curve bounds/monotonicity, workflow round trips,
 generation order, fail-closed encoder policy, and real FFmpeg PQ/10-bit output
 verification with identical decoded video when the SDR preview is enabled.
 They do not establish superiority over real-time converters.
+
+
+## HDRTVNet++ comparison build
+
+The optional Method selector now offers the exported AGCM+LE ensemble. It uses
+NVIDIA TensorRT/TensorRT-RTX inference (CPU video encoding remains available),
+one inference stream, and a separate validated FP32/no-TF32 engine cache. The
+first use builds an engine; subsequent uses of the same size/runtime reuse it.
+All model resources and their provenance are bundled, verified, and copied to a
+content-addressed private folder. Failure does not silently substitute the
+mathematical method.
+
+Canonical SDR BT.709 RGB enters the network. Its output is already BT.2020 PQ,
+so only an HDR exposure trim and target-peak shoulder are applied afterward.
+Mathematical Look, highlight strength and reference-white controls are hidden
+for this method; Exposure (stops) and target peak control the model's grade.
+No second inverse tone map, highlight hallucination, tiling, or temporal
+smoothing is applied. Start tests with a short 1080p HDR-only job and zero
+exposure trim, then compare the mathematical method on the same source.

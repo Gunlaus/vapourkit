@@ -1,3 +1,4 @@
+import { prepareHdrTvNet } from './hdrTvNet';
 import { hdrSettingsSchema, type HdrSettings } from './hdrSettings';
 import { prepareVsShader } from './shaders';
 import type { ShaderSettings } from './shaderTypes';
@@ -332,7 +333,7 @@ export class VapourSynthScriptGenerator {
    * renamed over it, so a script starting meanwhile never reads half a file.
    */
   private async syncRuntime(): Promise<void> {
-    for (const helper of ['vk_model_runtime.py', 'vk_rtx_runtime.py', 'vk_hdr_runtime.py']) {
+    for (const helper of ['vk_model_runtime.py', 'vk_rtx_runtime.py', 'vk_hdr_runtime.py', 'vk_hdr_ai.py']) {
       const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
       if (await fs.pathExists(helperSource)) {
         await fs.ensureDir(PATHS.CONFIG);
@@ -384,6 +385,13 @@ export class VapourSynthScriptGenerator {
     const defaultPrimaries = config.colorimetry?.defaultPrimaries || '709';
     const defaultTransfer = config.colorimetry?.defaultTransfer || '709';
     const hdr = hdrSettingsSchema.parse(config.colorimetry?.hdr ?? {});
+    let hdrInference = '';
+    if (hdr.enabled && hdr.method === 'hdrtvnet') {
+      if (!['tensorrt', 'tensorrt-rtx'].includes(defaultBackend)) throw new Error('HDRTVNet++ needs TensorRT or TensorRT-RTX in the inference selector.');
+      const assets = await prepareHdrTvNet();
+      const builder = await ensureEngineBuilderScript();
+      hdrInference = `, model=${pyString(assets.model)}, cache=${pyString(assets.cache)}, backend=${pyString(defaultBackend)}, builder=${pyString(builder)}, streams=1, cuda_graph=${performance.trtCudaGraphs ? 'True' : 'False'}`;
+    }
     const outputFormat = hdr.enabled ? 'vs.YUV420P10' : config.outputFormat || 'vs.YUV420P8';
 
     // Process filters sequentially
@@ -605,7 +613,7 @@ export class VapourSynthScriptGenerator {
       const standardTemplate = await fs.readFile(path.join(fixAsarPath(app.getAppPath()), 'include', 'vapoursynth_template.vpy'), 'utf8');
       const standardTail = standardTemplate.slice(standardTemplate.lastIndexOf(end)).trim();
       if (template.slice(at).trim() !== standardTail) throw new Error('HDR cannot safely replace a customized output conversion. Restore the standard script template or disable HDR.');
-      template = template.slice(0, at) + `# Managed HDR conversion after all SDR filters.\nclip = _vk_hdr.convert(clip, _vk_hdr_settings)\nclip = vk_timed_output(clip, vk_source_fps, source_timecodes)\n`;
+      template = template.slice(0, at) + `# Managed HDR conversion after all SDR filters.\nclip = _vk_hdr.convert(clip, _vk_hdr_settings${hdrInference})\nclip = vk_timed_output(clip, vk_source_fps, source_timecodes)\n`;
       if (config.generatePreviewOutputs) {
         template += `_vk_set_output(_vk_hdr.sdr_preview(clip), ${Math.max(previewOutputIndex + 1, SIDE_CHAIN_OUTPUT_BASE + sideChains.length)}, "HDR — SDR preview")\n`;
       } else template += 'clip.set_output()\n';

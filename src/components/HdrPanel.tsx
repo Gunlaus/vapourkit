@@ -19,16 +19,20 @@ export function HdrPanel({ settings, disabled, onChange }: {
     collapsible open={open && hdr.enabled} onToggle={() => setOpen(!open)}
     actions={<input type="checkbox" aria-label="Enable SDR to HDR" disabled={disabled} checked={hdr.enabled} onChange={e => { setOpen(e.target.checked); update({ enabled: e.target.checked }); }} />}>
     <fieldset disabled={disabled || !hdr.enabled} className="px-3 py-3 space-y-3 text-xs disabled:opacity-50">
-      <label className="block">Look<select className={input} value={hdr.preset} onChange={e => {
+      <label className="block">Method<select aria-label="HDR conversion method" className={input} value={hdr.method ?? 'mathematical'} onChange={e => update({ method: e.target.value as HdrSettings['method'] })}>
+        <option value="mathematical">Mathematical</option><option value="hdrtvnet">HDRTVNet++ (NVIDIA, experimental)</option>
+      </select></label>
+      {hdr.method !== 'hdrtvnet' && <label className="block">Look<select className={input} value={hdr.preset} onChange={e => {
         const preset = e.target.value as HdrSettings['preset'];
         update({ preset, ...(preset === 'natural' ? { strength: 0.35 } : preset === 'animation' ? { strength: 0.2 } : {}) });
-      }}><option value="natural">Natural</option><option value="animation">Animation</option><option value="custom">Custom</option></select></label>
+      }}><option value="natural">Natural</option><option value="animation">Animation</option><option value="custom">Custom</option></select></label>}
       <label className="block">Target peak<select aria-label="HDR target peak" className={input} value={hdr.peakNits} onChange={e => update({ peakNits: Number(e.target.value) })}>
         {[600,1000,2000,4000,...(![600,1000,2000,4000].includes(hdr.peakNits) ? [hdr.peakNits] : [])].map(value => <option key={value} value={value}>{value} nits</option>)}
       </select></label>
-      {hdr.preset === 'custom' && <label className="block">Highlight expansion<input aria-label="HDR highlight expansion" className="ml-2 align-middle" type="range" min="0" max="1" step="0.01" value={hdr.strength} onChange={e => update({ strength: Number(e.target.value), preset: 'custom' })} /> {Math.round(hdr.strength * 100)}%</label>}
+      {hdr.method !== 'hdrtvnet' && hdr.preset === 'custom' && <label className="block">Highlight expansion<input aria-label="HDR highlight expansion" className="ml-2 align-middle" type="range" min="0" max="1" step="0.01" value={hdr.strength} onChange={e => update({ strength: Number(e.target.value), preset: 'custom' })} /> {Math.round(hdr.strength * 100)}%</label>}
       <label className="flex items-center gap-2"><input type="checkbox" checked={hdr.chroma === 'auto'} onChange={e => update({ chroma: e.target.checked ? 'auto' : 'off' })} />Reconstruct subsampled chroma</label>
-      <label className="block">Reference white<input aria-label="HDR reference white" className={input + ' w-20'} type="number" min="80" max="300" value={hdr.referenceWhite} onChange={e => update({ referenceWhite: Number(e.target.value) })} /> nits</label>
+      {hdr.method !== 'hdrtvnet' && <label className="block">Reference white<input aria-label="HDR reference white" className={input + ' w-20'} type="number" min="80" max="300" value={hdr.referenceWhite} onChange={e => update({ referenceWhite: Number(e.target.value) })} /> nits</label>}
+      {hdr.method === 'hdrtvnet' && <label className="block">Exposure<input aria-label="HDRTVNet exposure" className={input + ' w-20'} type="number" min="-2" max="2" step="0.1" value={hdr.aiExposure ?? 0} onChange={e => update({ aiExposure: Number(e.target.value) })} /> stops</label>}
       {error && <p role="alert" className="text-bad-400">{error}</p>}
     </fieldset>
   </Section>;

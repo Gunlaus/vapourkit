@@ -89,8 +89,9 @@ async function generate(
 
 beforeAll(async () => {
   await fs.ensureDir(path.join(testRoot, 'include'));
+  await fs.copy(path.join(__dirname, '..', 'include', 'hdrtvnet'), path.join(testRoot, 'include', 'hdrtvnet'));
   await fs.copy(path.join(__dirname, '..', 'include', 'shaders'), path.join(testRoot, 'include', 'shaders'));
-  for (const file of ['vk_rtx_runtime.py', 'vk_hdr_runtime.py', 'build_trt_engine.py']) {
+  for (const file of ['vk_rtx_runtime.py', 'vk_hdr_runtime.py', 'vk_hdr_ai.py', 'build_trt_engine.py']) {
     await fs.copy(path.join(__dirname, '..', 'include', file), path.join(testRoot, 'include', file));
   }
   await fs.copy(path.join(__dirname, '..', 'include', 'vk_model_runtime.py'), path.join(testRoot, 'include', 'vk_model_runtime.py'));
@@ -914,4 +915,18 @@ it('reconstructs source chroma before SDR filters and converts HDR only after th
     if (generatePreviewOutputs) expect(script).toContain('HDR — SDR preview');
     else expect(script).toContain('clip.set_output()');
   }
+});
+
+
+it('generates a dedicated HDRTVNet++ adapter with private paths and one inference stream', async () => {
+  const generator = new VapourSynthScriptGenerator('win32');
+  const file = await generator.generateScript({ inputVideo: 'source.mkv', defaultBackend: 'tensorrt',
+    colorimetry: { overwriteMatrix: false, matrix709: true, defaultMatrix: '709', defaultPrimaries: '709', defaultTransfer: '709',
+      hdr: { enabled: true, method: 'hdrtvnet', preset: 'natural', peakNits: 1000, referenceWhite: 203, strength: .35, chroma: 'auto', sourceTransfer: 'auto' } },
+  });
+  const script = await fs.readFile(file, 'utf8'); await fs.remove(file);
+  expect(script).toContain('_vk_hdr.convert(clip, _vk_hdr_settings, model=');
+  expect(script).toContain('hdrtvnet');
+  expect(script).toContain('streams=1');
+  expect(script).toContain('backend="tensorrt"');
 });

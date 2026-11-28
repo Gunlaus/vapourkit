@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { splitArgs, type EncodingSettings } from './encodingSettings';
 
 export const hdrSettingsSchema = z.object({
+  method: z.enum(['mathematical', 'hdrtvnet']).optional(),
+  aiExposure: z.number().finite().min(-2).max(2).optional(),
   enabled: z.boolean().default(false),
   preset: z.enum(['natural', 'animation', 'custom']).default('natural'),
   peakNits: z.number().finite().min(400).max(4000).default(1000),

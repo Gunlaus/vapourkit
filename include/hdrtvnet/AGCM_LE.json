@@ -1,0 +1,110 @@
+{
+  "resizeReferenceMaxAbsError": 1.7881393432617188e-07,
+  "upstream": "c77ad33a2d186482ef1f4d23990cbf39d8dbd727",
+  "checkpointSha256": "7cb7be146e5912826dc652c43a8512e47cd58de46abdfa200f6e3a7e5b74e040",
+  "modelSha256": "d6bcbf4178f0a89b9b59884a13fff1dcd9026052979559316a488974be0679b7",
+  "input": "BT.709 SDR RGB [0,1]",
+  "output": "BT.2020 PQ RGB [0,1]",
+  "minimumDimension": 128,
+  "internalPadding": "reflect to multiple of 8, cropped after inference",
+  "condition": "symmetric antialiased cubic quarter-scale, full frame",
+  "hallucination": false,
+  "validation": [
+    {
+      "shape": [
+        128,
+        160
+      ],
+      "input": "random",
+      "maxAbsError": 3.5762786865234375e-07
+    },
+    {
+      "shape": [
+        128,
+        160
+      ],
+      "input": "black",
+      "maxAbsError": 3.4458935260772705e-08
+    },
+    {
+      "shape": [
+        128,
+        160
+      ],
+      "input": "white",
+      "maxAbsError": 1.7881393432617188e-07
+    },
+    {
+      "shape": [
+        128,
+        160
+      ],
+      "input": "gradient",
+      "maxAbsError": 2.384185791015625e-07
+    },
+    {
+      "shape": [
+        149,
+        173
+      ],
+      "input": "random",
+      "maxAbsError": 3.5762786865234375e-07
+    },
+    {
+      "shape": [
+        149,
+        173
+      ],
+      "input": "black",
+      "maxAbsError": 5.2852556109428406e-08
+    },
+    {
+      "shape": [
+        149,
+        173
+      ],
+      "input": "white",
+      "maxAbsError": 1.7881393432617188e-07
+    },
+    {
+      "shape": [
+        149,
+        173
+      ],
+      "input": "gradient",
+      "maxAbsError": 1.7881393432617188e-07
+    },
+    {
+      "shape": [
+        240,
+        320
+      ],
+      "input": "random",
+      "maxAbsError": 3.5762786865234375e-07
+    },
+    {
+      "shape": [
+        240,
+        320
+      ],
+      "input": "black",
+      "maxAbsError": 4.662433639168739e-08
+    },
+    {
+      "shape": [
+        240,
+        320
+      ],
+      "input": "white",
+      "maxAbsError": 4.76837158203125e-07
+    },
+    {
+      "shape": [
+        240,
+        320
+      ],
+      "input": "gradient",
+      "maxAbsError": 1.7881393432617188e-07
+    }
+  ]
+}

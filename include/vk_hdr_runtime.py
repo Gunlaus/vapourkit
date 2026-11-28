@@ -87,10 +87,18 @@ def _linear_rgb(clip, settings):
     return core.resize.Spline36(clip, format=vs.RGBS, primaries_s='2020', transfer_s='linear', **kwargs)
 
 
-def convert(clip, settings):
+def convert(clip, settings, model=None, cache=None, backend='tensorrt', builder=None, streams=1, cuda_graph=True):
     import vapoursynth as vs
     core = vs.core
     peak, white, strength = validate(settings)
+    if settings.get('method') == 'hdrtvnet':
+        if not model or not cache or not builder: raise RuntimeError('HDRTVNet++ model/runtime paths are missing.')
+        import vk_hdr_ai
+        linear = _linear_rgb(clip, settings)
+        canonical = core.resize.Spline36(linear, format=vs.RGBS, primaries_s='709', transfer_s='709')
+        canonical = core.std.Expr(canonical, 'x 0 max 1 min')
+        prediction = vk_hdr_ai.load_model(canonical, model, cache, backend, builder, streams, cuda_graph)
+        return finish_ai(prediction, settings)
     rgb = _linear_rgb(clip, settings)
     rgb = core.std.Expr(rgb, 'x 0 max 1 min')
     r, g, b = [core.std.ShufflePlanes(rgb, i, vs.GRAY) for i in range(3)]
@@ -103,11 +111,40 @@ def convert(clip, settings):
     channels = [core.std.Expr([c, gain], 'x y *') for c in (r, g, b)]
     expanded = core.std.ShufflePlanes(channels, [0, 0, 0], vs.RGB)
     expanded = core.std.SetFrameProps(expanded, _Matrix=0, _Transfer=8, _Primaries=9, _Range=1)
+    return _pq_output(expanded)
+
+
+def _pq_output(expanded):
+    import vapoursynth as vs
+    core = vs.core
     # Linear value 1 represents 100 nits. zimg handles the actual PQ encoding.
     pq = core.resize.Spline36(expanded, format=vs.YUV420P10,
         transfer_s='st2084', primaries_s='2020', matrix_s='2020ncl',
         range_s='limited', nominal_luminance=100, dither_type='error_diffusion')
     return core.std.SetFrameProps(pq, _Matrix=9, _Transfer=16, _Primaries=9, _Range=0)
+
+
+def finish_ai(prediction, settings):
+    """Treat model output as PQ, then apply only an HDR exposure/peak trim."""
+    import vapoursynth as vs
+    core = vs.core
+    peak, _, _ = validate(settings)
+    exposure = float(settings.get('aiExposure', 0))
+    if not math.isfinite(exposure) or not -2 <= exposure <= 2:
+        raise ValueError('HDRTVNet++ exposure must be between -2 and 2 stops.')
+    rgb = core.resize.Spline36(prediction, format=vs.RGBS, transfer_s='linear', nominal_luminance=100)
+    rgb = core.std.Expr(rgb, f'x 0 max {2 ** exposure} *')
+    r, g, b = [core.std.ShufflePlanes(rgb, i, vs.GRAY) for i in range(3)]
+    y = core.std.Expr([r, g, b], 'x 0.2627 * y 0.6780 * + z 0.0593 * +')
+    maximum = core.std.Expr([r, g, b], 'x y max z max 0.000001 max')
+    # Preserve luminance below 75% of the target peak; smoothly roll off above.
+    knee, shoulder = peak * .75 / 100, peak * .25 / 100
+    mapped = core.std.Expr(y, f'x {knee} > {knee} {shoulder} 1 x {knee} - {shoulder} / -1 * exp - * + x ?')
+    gain = core.std.Expr([mapped, y, maximum], f'x y 0.000001 max / {peak / 100} z / min')
+    planes = [core.std.Expr([channel, gain], 'x y *') for channel in (r, g, b)]
+    linear = core.std.ShufflePlanes(planes, [0, 0, 0], vs.RGB)
+    linear = core.std.SetFrameProps(linear, _Matrix=0, _Transfer=8, _Primaries=9, _Range=1)
+    return _pq_output(linear)
 
 
 def sdr_preview(clip):
