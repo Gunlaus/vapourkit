@@ -65,7 +65,8 @@ options = ort.SessionOptions(); options.intra_op_num_threads = 2
 session = ort.InferenceSession(str(model), sess_options=options, providers=['CPUExecutionProvider'])
 
 def cpu_inference(clip, *args, **kwargs):
-    def evaluate(n, frame):
+    def evaluate(n, f):
+        frame = f
         pixels = np.stack([np.asarray(frame[p]) for p in range(3)])[None].astype(np.float32)
         prediction = session.run(None, {'input': pixels})[0][0]
         output = frame.copy()
