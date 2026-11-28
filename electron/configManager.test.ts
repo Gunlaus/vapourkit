@@ -8,7 +8,7 @@ const { dir } = vi.hoisted(() => {
   return { dir: nodePath.join(nodeOs.tmpdir(), `vk-config-test-${process.pid}`) };
 });
 
-vi.mock('./constants', () => ({ PATHS: { CONFIG: dir } }));
+vi.mock('./constants', () => ({ PATHS: { CONFIG: dir, MODELS: path.join(dir, 'models') } }));
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 // No bundled stock config, so loading does not migrate (and write) anything.
 vi.mock('./utils', () => ({ getBundledBasePath: () => path.join(dir, 'no-bundle') }));
@@ -127,4 +127,15 @@ describe('encoding settings', () => {
     expect(await manager.setEncodingSettings('-c:v libx264')).toBe(false);
     expect(manager.getFfmpegArgs()).toBe(resolveEncodingArgs(DEFAULT_ENCODING));
   });
+});
+
+it('keeps package-specific precision and temporal metadata separate for identical names', async () => {
+  const manager = new ConfigManager();
+  await manager.load();
+  await manager.setModelMetadata('packages/model-aaaa/model', true, 'image');
+  await manager.setModelMetadata('packages/model-bbbb/model', false, 'vsr', undefined, undefined, true, 7);
+  expect(manager.isModelFp32(path.join(dir, 'models/packages/model-aaaa/model.onnx'))).toBe(true);
+  expect(manager.isModelFp32(path.join(dir, 'models/packages/model-bbbb/model.onnx'))).toBe(false);
+  expect(manager.getModelType(path.join(dir, 'models/packages/model-bbbb/model.onnx'))).toBe('vsr');
+  expect(manager.getTemporalFrames(path.join(dir, 'models/packages/model-bbbb/model.onnx'))).toBe(7);
 });

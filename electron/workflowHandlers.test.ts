@@ -80,3 +80,15 @@ describe('workflow encoding settings', () => {
       .toMatchObject({ mode: 'advanced', simple: { codec: 'h265' }, customArgs: '-c:v libx265 -x265-params aq-mode=3' });
   });
 });
+
+it('round-trips shader identity, scale and controls in a real TOML workflow', async () => {
+  registerWorkflowHandlers();
+  const shader = { path: 'C:/shaders/shader.glsl', name: 'Example', scale: 2, presetId: 'anime4k-x2-s', parameters: { GAIN: 1.25 } };
+  try {
+    expect(await invoke('export-workflow', { name: 'shader', version: '1', filters: [
+      { name: 'Shader', code: '', enabled: true, order: 0, filterType: 'shader', shader },
+    ] }, file)).toEqual({ success: true });
+    const imported = await invoke('import-workflow', file);
+    expect(imported.workflow.filters[0]).toMatchObject({ filterType: 'shader', shader });
+  } finally { await fs.remove(file); }
+});

@@ -1,3 +1,5 @@
+import { pipelineSettingsSchema, type PipelineSettings } from './pipelineSettings';
+import { modelMetadataKey } from './modelIdentity';
 // electron/configManager.ts
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -9,6 +11,7 @@ import type { ModelType } from './scriptGenerator';
 import type { GpuVendor } from './gpuDetection';
 import type { DiscordRichPresenceSettings } from './discordRichPresence';
 import { DEFAULT_ROCM_SETTING, setRocmSetting, type RocmSetting } from './rocmEnvironment';
+import { setGpuChoice, type GpuChoice } from './gpuSelection';
 import {
   encodingFrom,
   migrateLegacyArgs,
@@ -32,6 +35,7 @@ interface Filter {
 }
 
 interface AppConfig {
+  pipeline?: PipelineSettings;
   colorimetry?: {
     overwriteMatrix: boolean;
     matrix709: boolean;
@@ -67,6 +71,8 @@ interface AppConfig {
   linuxPluginFilterCatalogRevision?: number;
   /** Which ROCm the MIGraphX backend runs against on Linux (rocmEnvironment.ts). */
   rocm?: RocmSetting;
+  /** The GPU inference runs on (gpuSelection.ts); absent means each backend's default. */
+  gpu?: GpuChoice;
   models: {
     [modelName: string]: {
       useFp32: boolean;
@@ -161,6 +167,7 @@ export class ConfigManager {
     }
     this.config.encoding = encodingFrom(this.config.encoding, this.config.ffmpegArgs ?? DEFAULT_FFMPEG_ARGS) ?? undefined;
     setRocmSetting(this.config.rocm);
+    setGpuChoice(this.config.gpu);
   }
 
   private async migrateConfigWithStock(userConfig: Record<string, unknown>): Promise<AppConfig> {
@@ -371,24 +378,34 @@ export class ConfigManager {
   }
 
   isModelFp32(modelPath: string): boolean {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Use metadata from config, default to false (fp16) if not found
     return metadata?.useFp32 ?? false;
   }
 
   getModelType(modelPath: string): ModelType {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Return stored model type, default to 'image' as it's the most common type
     return metadata?.modelType || 'image';
   }
 
   getTemporalFrames(modelPath: string): number {
-    const filename = path.basename(modelPath, path.extname(modelPath));
+    const filename = modelMetadataKey(modelPath, PATHS.MODELS);
     const metadata = this.getModelMetadata(filename);
     // Return temporal frames count, default to 5 for backward compatibility
     return metadata?.temporalFrames ?? 5;
+  }
+
+  getPipelineSettings(): PipelineSettings {
+    const parsed = pipelineSettingsSchema.safeParse(this.config.pipeline ?? {});
+    return parsed.success ? parsed.data : pipelineSettingsSchema.parse({});
+  }
+
+  async setPipelineSettings(settings: PipelineSettings): Promise<void> {
+    this.config.pipeline = pipelineSettingsSchema.parse(settings);
+    await this.save();
   }
 
   getColorimetrySettings(): { overwriteMatrix: boolean; matrix709: boolean; defaultMatrix: '709' | '170m'; defaultPrimaries: '709' | '601'; defaultTransfer: '709' | '170m' } {
@@ -501,6 +518,16 @@ export class ConfigManager {
   async setRocmSetting(setting: RocmSetting): Promise<void> {
     this.config.rocm = setting;
     setRocmSetting(setting);
+    await this.save();
+  }
+
+  getGpuChoice(): GpuChoice | undefined {
+    return this.config.gpu;
+  }
+
+  async setGpuChoice(choice: GpuChoice | undefined): Promise<void> {
+    this.config.gpu = choice;
+    setGpuChoice(choice);
     await this.save();
   }
 

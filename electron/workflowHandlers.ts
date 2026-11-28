@@ -33,6 +33,7 @@ export function registerWorkflowHandlers() {
           sourcePath: f.sourcePath || undefined,
           align: f.align || undefined,
           chain: f.chain || undefined,
+          shader: f.shader || undefined,
           modelPath: f.modelPath || undefined,
           modelType: f.modelType || undefined,
           // Per-filter overrides round-trip with the workflow
@@ -129,6 +130,7 @@ export function registerWorkflowHandlers() {
             sourcePath: typeof f.sourcePath === 'string' ? f.sourcePath : undefined,
             align: f.align && typeof f.align === 'object' && Array.isArray(f.align.sections) ? f.align : undefined,
             chain: typeof f.chain === 'string' ? f.chain : undefined,
+            shader: f.shader || undefined,
             modelPath: f.modelPath || undefined,
             modelType: f.modelType || undefined,
             backend: f.backend || undefined,

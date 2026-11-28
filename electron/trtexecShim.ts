@@ -14,6 +14,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { randomUUID } from 'crypto';
 import { logger } from './logger';
 import { IS_WINDOWS, PATHS } from './constants';
 import { getBundledBasePath } from './utils';
@@ -38,9 +39,38 @@ export async function ensureEngineBuilderScript(): Promise<string> {
   const current = await fs.readFile(builderScript).catch(() => null);
   if (!current || !current.equals(bundled)) {
     await fs.ensureDir(PATHS.APP_DATA);
-    await fs.writeFile(builderScript, bundled);
+    const stage = `${builderScript}.${randomUUID()}.tmp`;
+    try { await fs.writeFile(stage, bundled); await fs.rename(stage, builderScript); }
+    finally { await fs.remove(stage); }
+  }
+  await ensureModelRuntimeScript();
+  const rtxHelper = path.join(getBundledBasePath(), 'include', 'vk_rtx_runtime.py');
+  if (await fs.pathExists(rtxHelper)) {
+    const content = await fs.readFile(rtxHelper);
+    const target = path.join(PATHS.APP_DATA, 'vk_rtx_runtime.py');
+    const current = await fs.readFile(target).catch(() => null);
+    if (!current?.equals(content)) {
+      const stage = `${target}.${randomUUID()}.tmp`;
+      try { await fs.writeFile(stage, content); await fs.rename(stage, target); }
+      finally { await fs.remove(stage); }
+    }
   }
   return builderScript;
+}
+
+/** Stage the application helper for both shape inspection and engine builds. */
+export async function ensureModelRuntimeScript(): Promise<string> {
+  const target = path.join(PATHS.APP_DATA, 'vk_model_runtime.py');
+  const bundled = await fs.readFile(path.join(getBundledBasePath(), 'include', 'vk_model_runtime.py')).catch(() => { throw new Error('Vapourkit application runtime is incomplete: vk_model_runtime.py is missing from this build. Extract a complete current application build into a new folder.'); });
+  const current = await fs.readFile(target).catch(() => null);
+  if (!current || !current.equals(bundled)) {
+    await fs.ensureDir(PATHS.APP_DATA);
+    const { randomUUID } = await import('crypto');
+    const stage = `${target}.${randomUUID()}.tmp`;
+    await fs.writeFile(stage, bundled);
+    await fs.rename(stage, target);
+  }
+  return target;
 }
 
 /**

@@ -1,3 +1,7 @@
+import { modelMetadataKey } from './modelIdentity';
+import { hasBuiltEngine, importModelPackage, listModelFiles } from './modelPackage';
+import { describeModel } from './modelContract';
+import { inspectResolvedOnnxGraph } from './modelGraphResolver';
 import { ipcMain, BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -80,7 +84,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
     try {
       await fs.ensureDir(PATHS.MODELS);
       
-      const files = await fs.readdir(PATHS.MODELS);
+      const files = await listModelFiles(PATHS.MODELS);
       const engineFiles = files.filter(f => f.endsWith('.engine'));
       const onnxFiles = files.filter(f => f.endsWith('.onnx'));
       
@@ -89,26 +93,27 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
       const onnxBasenamesWithEngines = new Set<string>();
       for (const engineFile of engineFiles) {
         const engineBaseName = path.basename(engineFile, '.engine');
+        onnxBasenamesWithEngines.add(modelMetadataKey(engineFile, PATHS.MODELS));
         // Engine files have doubled precision suffix, e.g., model_fp16_fp16.engine
         // Try to find the corresponding ONNX basename
         const match = engineBaseName.match(/^(.+)_(fp16|fp32)$/i);
         if (match) {
-          onnxBasenamesWithEngines.add(match[1]);
+          onnxBasenamesWithEngines.add(modelMetadataKey(path.join(path.dirname(engineFile), match[1] + '.onnx'), PATHS.MODELS));
         }
       }
 
       // Include both .engine files (for TensorRT) and .onnx files (for DirectML)
       const models = [
         ...engineFiles.map(file => {
-          const metadataId = path.basename(file, '.engine');
+          const metadataId = modelMetadataKey(file, PATHS.MODELS);
           const id = `${metadataId}::engine`;
           const metadata = configManager.getModelMetadata(metadataId);
           return {
             id,
             metadataId,
-            name: metadataId, // Clean: just the filename without extension
+            name: path.basename(file, path.extname(file)),
             path: path.join(PATHS.MODELS, file),
-            precision: metadata?.useFp32 ? 'FP32' : 'FP16',
+            precision: metadata?.useFp32 ? 'FP32' : metadata?.useBf16 ? 'BF16' : 'FP16',
             backend: 'tensorrt' as const,
             modelType: metadata?.modelType || 'image',
             displayTag: metadata?.displayTag,
@@ -117,7 +122,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           };
         }),
         ...onnxFiles.map(file => {
-          const metadataId = path.basename(file, '.onnx');
+          const metadataId = modelMetadataKey(file, PATHS.MODELS);
           const id = `${metadataId}::onnx`;
           const metadata = configManager.getModelMetadata(metadataId);
           const hasEngine = onnxBasenamesWithEngines.has(metadataId);
@@ -125,9 +130,9 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           return {
             id,
             metadataId,
-            name: metadataId, // Clean: just the filename without extension
+            name: path.basename(file, path.extname(file)),
             path: path.join(PATHS.MODELS, file),
-            precision: metadata?.useFp32 ? 'FP32' : 'FP16',
+            precision: metadata?.useFp32 ? 'FP32' : metadata?.useBf16 ? 'BF16' : 'FP16',
             backend: 'onnx' as const,
             hasEngine,
             modelType: metadata?.modelType || 'image',
@@ -151,22 +156,19 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
     try {
       await fs.ensureDir(PATHS.MODELS);
       
-      const files = await fs.readdir(PATHS.MODELS);
+      const files = await listModelFiles(PATHS.MODELS);
       const onnxFiles = files.filter(f => f.endsWith('.onnx'));
       const engineFiles = files.filter(f => f.endsWith('.engine'));
       
       // Find ONNX models without corresponding engine files
       const uninitializedModels = onnxFiles
-        .filter(onnxFile => {
-          const engineFile = onnxFile.replace('.onnx', '.engine');
-          return !engineFiles.includes(engineFile);
-        })
+        .filter(onnxFile => !hasBuiltEngine(onnxFile, engineFiles))
         .map(file => {
           const modelName = path.basename(file, '.onnx');
-          const metadata = configManager.getModelMetadata(modelName);
+          const metadata = configManager.getModelMetadata(modelMetadataKey(file, PATHS.MODELS));
           
           return {
-            id: modelName,
+            id: modelMetadataKey(file, PATHS.MODELS),
             name: modelName,
             onnxPath: path.join(PATHS.MODELS, file),
             modelType: metadata?.modelType,
@@ -220,6 +222,9 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           });
         };
 
+        const inspected = await inspectResolvedOnnxGraph(params.onnxPath);
+        if (!inspected) throw new Error('Cannot inspect model graph.');
+        describeModel(inspected, { modelType: params.modelType, temporalFrames: params.temporalFrames });
         sendProgress('converting', 0, 'Starting TensorRT engine conversion...');
 
         // Add precision suffix to model name, unless it already declares one
@@ -227,7 +232,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           params.modelName,
           precisionOf(params.useFp32, params.useBf16)
         );
-        const enginePath = path.join(PATHS.MODELS, `${modelNameWithPrecision}.engine`);
+        const enginePath = path.join(path.dirname(params.onnxPath), `${modelNameWithPrecision}.engine`);
 
         const built = await buildModelEngine(
           mainWindow,
@@ -253,10 +258,12 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
         }
 
         logger.model(`Engine created: ${enginePath}`);
+        const builtManifest = await fs.readJson(enginePath + '.json').catch(() => null);
+        if (builtManifest?.precision) { params.useFp32 = builtManifest.precision === 'fp32'; params.useBf16 = builtManifest.precision === 'bf16'; }
         
         // Save model metadata including type and display tag
         await configManager.setModelMetadata(
-          modelNameWithPrecision,
+          modelMetadataKey(enginePath, PATHS.MODELS),
           params.useFp32,
           (params.modelType as 'vsr' | 'image') || 'image',
           params.displayTag,
@@ -320,6 +327,10 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
 
       try {
 
+        const inspected = await inspectResolvedOnnxGraph(params.onnxPath);
+        if (!inspected) throw new Error('Cannot inspect model graph.');
+        describeModel(inspected, { modelType: params.modelType, temporalFrames: params.temporalFrames });
+        // Validation can skip a reference-runtime load, never the input contract.
         // Validate ONNX model unless skipValidation is set
         if (!params.skipValidation) {
           const { ModelValidator } = await import('./modelValidator');
@@ -367,13 +378,12 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
           logger.model(`Added precision suffix: ${modelNameWithPrecision.slice(params.modelName.length)}`);
         }
         
-        const targetOnnxPath = path.join(PATHS.MODELS, `${modelNameWithPrecision}.onnx`);
-        await fs.copy(params.onnxPath, targetOnnxPath, { overwrite: true });
+        const targetOnnxPath = await importModelPackage(params.onnxPath, PATHS.MODELS, modelNameWithPrecision);
         logger.model(`ONNX copied to: ${targetOnnxPath}`);
         
         // Save model metadata including type and display tag
         await configManager.setModelMetadata(
-          modelNameWithPrecision,
+          modelMetadataKey(targetOnnxPath, PATHS.MODELS),
           params.useFp32,
           (params.modelType as 'vsr' | 'image') || 'image',
           params.displayTag,
@@ -396,7 +406,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
         // Build the backend-specific engine (TensorRT)
         sendModelImportProgress(mainWindow, 'converting', 30, `Converting to TensorRT engine (${params.useFp32 ? 'FP32' : params.useBf16 ? 'BF16' : 'FP16'})...`);
 
-        const enginePath = path.join(PATHS.MODELS, `${modelNameWithPrecision}.engine`);
+        const enginePath = path.join(path.dirname(targetOnnxPath), `${modelNameWithPrecision}.engine`);
 
         const built = await buildModelEngine(
           mainWindow,
@@ -426,6 +436,9 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
 
         logger.model(`Engine created: ${enginePath}`);
         
+        const builtManifest = await fs.readJson(enginePath + '.json').catch(() => null);
+        if (builtManifest?.precision) await configManager.updateModelMetadata(modelMetadataKey(targetOnnxPath, PATHS.MODELS), { useFp32: builtManifest.precision === 'fp32', useBf16: builtManifest.precision === 'bf16' });
+
         // Complete
         sendModelImportProgress(mainWindow, 'complete', 100, 'Model imported successfully!', enginePath);
 
@@ -495,7 +508,7 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
       logger.info(`Deleted file: ${modelPath}`);
 
       // Delete metadata only for this specific model ID
-      await configManager.deleteModelMetadata(modelId);
+      await configManager.deleteModelMetadata(modelMetadataKey(modelPath, PATHS.MODELS));
       logger.info(`Deleted metadata for model: ${modelId}`);
 
       return { success: true };
@@ -521,15 +534,19 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
         return { success: false, error: `A model named "${newName}${ext}" already exists` };
       }
 
+      if (path.basename(newName) !== newName || path.win32.basename(newName) !== newName || newName === '.' || newName === '..') throw new Error('Choose a name without path separators.');
       // Rename the file
       await fs.rename(modelPath, newPath);
+      for (const suffix of ['.json', '.contract.json']) {
+        if (await fs.pathExists(modelPath + suffix)) await fs.rename(modelPath + suffix, newPath + suffix);
+      }
       logger.info(`Renamed file: ${modelPath} -> ${newPath}`);
 
       // Migrate metadata from old key to new key
-      const oldMetadata = configManager.getModelMetadata(modelId);
+      const oldMetadata = configManager.getModelMetadata(modelMetadataKey(modelPath, PATHS.MODELS));
       if (oldMetadata) {
         await configManager.setModelMetadata(
-          newName,
+          modelMetadataKey(newPath, PATHS.MODELS),
           oldMetadata.useFp32,
           oldMetadata.modelType,
           oldMetadata.displayTag,
@@ -539,13 +556,13 @@ export function registerModelHandlers(mainWindow: BrowserWindow | null) {
         );
         // Copy category if present
         if (oldMetadata.category) {
-          await configManager.updateModelMetadata(newName, { category: oldMetadata.category });
+          await configManager.updateModelMetadata(modelMetadataKey(newPath, PATHS.MODELS), { category: oldMetadata.category });
         }
-        await configManager.deleteModelMetadata(modelId);
+        await configManager.deleteModelMetadata(modelMetadataKey(modelPath, PATHS.MODELS));
         logger.info(`Migrated metadata: ${modelId} -> ${newName}`);
       }
 
-      return { success: true, newPath, newId: newName };
+      return { success: true, newPath, newId: modelMetadataKey(newPath, PATHS.MODELS) };
     } catch (error) {
       logger.error('Error renaming model:', error);
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';

@@ -2,8 +2,25 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPipelineSettings: () => ipcRenderer.invoke('get-pipeline-settings'),
+  chooseShader: (presetId?: string) => ipcRenderer.invoke('shader-choose', presetId),
+  listShaderLibrary: () => ipcRenderer.invoke('shader-library-list'),
+  readShaderLibrary: (id: string) => ipcRenderer.invoke('shader-library-read', id),
+  saveShaderLibrary: (entry: import('./shaderTypes').ShaderLibraryEntry) => ipcRenderer.invoke('shader-library-save', entry),
+  importShaderLibrary: () => ipcRenderer.invoke('shader-library-import'),
+  getShaderRuntimeStatus: () => ipcRenderer.invoke('shader-runtime-status'),
+  installShaderRuntime: () => ipcRenderer.invoke('shader-runtime-install'),
+  getShaderInfo: (settings: import('./shaderTypes').ShaderSettings) => ipcRenderer.invoke('shader-info', settings),
+  getRtxRuntimeStatus: () => ipcRenderer.invoke('rtx-runtime-status'),
+  installRtxRuntime: () => ipcRenderer.invoke('rtx-runtime-install'),
+  getNvencRuntimeStatus: () => ipcRenderer.invoke('nvencc-runtime-status'),
+  installNvencRuntime: () => ipcRenderer.invoke('nvencc-runtime-install'),
+  clearNvencEngineCache: () => ipcRenderer.invoke('nvencc-clear-engine-cache'),
+  setPipelineSettings: (settings: import('./pipelineSettings').PipelineSettings) => ipcRenderer.invoke('set-pipeline-settings', settings),
+  setPreviewEnabled: (enabled: boolean) => ipcRenderer.invoke('set-preview-enabled', enabled),
   // Dependency management
   platform: process.platform,
+  checkEncodingSupport: (request: { encoder: string; pixelFormat: string }) => ipcRenderer.invoke('check-encoding-support', request),
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   getNvencDriverProblem: () => ipcRenderer.invoke('get-nvenc-driver-problem'),
   detectCudaSupport: () => ipcRenderer.invoke('detect-cuda-support'),
@@ -126,7 +143,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVersion: () => ipcRenderer.invoke('get-version'),
   
   // Log file reading (efficient polling-based console)
-  readLogTail: (maxLines?: number) => ipcRenderer.invoke('read-log-tail', maxLines),
+  readLogTail: (maxLines?: number, afterOffset?: number) => ipcRenderer.invoke('read-log-tail', maxLines, afterOffset),
+  getConsoleLogCursor: () => ipcRenderer.invoke('console-log-cursor'),
   resetLogCache: () => ipcRenderer.invoke('reset-log-cache'),
   
   // Folder access
@@ -134,10 +152,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openConfigFolder: () => ipcRenderer.invoke('open-config-folder'),
   openVSPluginsFolder: () => ipcRenderer.invoke('open-vs-plugins-folder'),
   openVSScriptsFolder: () => ipcRenderer.invoke('open-vs-scripts-folder'),
-
-  // DLSS 5 Neural Uplift runtime (nvngx_dlssnr.dll)
-  dlssRuntimeStatus: () => ipcRenderer.invoke('dlss-runtime-status'),
-  dlssRuntimeImport: () => ipcRenderer.invoke('dlss-runtime-import'),
 
   // Post-update notice: what the last update did, and the edited templates it asks about
   getUpdateReport: () => ipcRenderer.invoke('update-report-get'),
@@ -187,6 +201,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Descriptive naming
   getRocmSetting: () => ipcRenderer.invoke('get-rocm-setting'),
   setRocmSetting: (setting: { mode: string; customRoot?: string }) => ipcRenderer.invoke('set-rocm-setting', setting),
+  getGpus: () => ipcRenderer.invoke('get-gpus'),
+  setGpu: (index: number | null) => ipcRenderer.invoke('set-gpu', index),
   getDescriptiveNamingEnabled: () => ipcRenderer.invoke('get-descriptive-naming-enabled'),
   setDescriptiveNamingEnabled: (enabled: boolean) => ipcRenderer.invoke('set-descriptive-naming-enabled', enabled),
 
@@ -211,6 +227,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Backend operations
   reloadBackend: () => ipcRenderer.invoke('reload-backend'),
   
+  listFilterRepository: (refresh: boolean) => ipcRenderer.invoke('filter-repository-list', refresh),
+  installRepositoryFilter: (id: string) => ipcRenderer.invoke('filter-repository-install', id),
   // Filter template operations
   getFilterTemplates: () => ipcRenderer.invoke('get-filter-templates'),
   saveFilterTemplate: (template: any) => ipcRenderer.invoke('save-filter-template', template),
@@ -247,6 +265,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('plugin-dependency-progress', listener);
   },
   
+  listCatalogModels: () => ipcRenderer.invoke('model-catalog-list'),
+  installCatalogModel: (request: { id: string; version: string; experimental: boolean; accepted: boolean }) => ipcRenderer.invoke('model-catalog-install', request),
   // Update operations
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   openReleasesPage: () => ipcRenderer.invoke('open-releases-page'),

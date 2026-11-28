@@ -1,8 +1,10 @@
+import { MediaTracksPanel } from './components/MediaTracksPanel';
 // src/App.tsx - Refactored with extracted components and hooks
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { NotificationContainer } from './components/NotificationContainer';
 import { ConfirmDialogHost } from './components/ConfirmDialogHost';
+import { ask } from './utils/dialogs';
 import { notify } from './utils/notifications';
 import { QueuePanel } from './components/QueuePanel';
 import { AppModals } from './components/AppModals';
@@ -11,11 +13,11 @@ import { ConsoleDrawer } from './components/ConsoleDrawer';
 import { Scrubber } from './components/Scrubber';
 import { EngineBuildBanner } from './components/EngineBuildBanner';
 import type { BackendId, ColorimetrySettings, EncodingSettings, EngineBuildStatus, UpdateInfo, SegmentSelection, VsMlrtVersionInfo, Filter, FilterParameterValues } from './electron';
-import { getBackendDescriptor, normalizeBackendForCurrentPlatform, resolveFilterBackend } from './utils/backends';
+import { getBackendDescriptor, normalizeBackendForCurrentPlatform } from './utils/backends';
+import { hasUnbuiltEngineModel } from './utils/modelUtils';
 import { AppRail } from './components/AppRail';
 import { TitleStrip } from './components/TitleStrip';
 import { ModelBuildNotification } from './components/ModelBuildNotification';
-import { DlssRuntimeNotification } from './components/DlssRuntimeNotification';
 import { useModels } from './hooks/useModels';
 import { useSettings } from './hooks/useSettings';
 import { usePrivacyMode } from './hooks/usePrivacyMode';
@@ -90,7 +92,7 @@ function App() {
   }, []);
 
   // Setup and initialization hooks
-  const { consoleOutput, consoleEndRef, addConsoleLog } = useConsoleLog();
+  const { consoleOutput, consoleEndRef, addConsoleLog, clearConsole } = useConsoleLog();
   const { isSetupComplete, isCheckingDeps, hasCudaSupport, recommendedBackend, setupProgress, isSettingUp, handleSetup, pluginInstallError, setupError, setupWarnings, handleRetryPlugins, handleContinueWithoutPlugins } = useSetup(addConsoleLog);
 
   // An NVIDIA driver too old for the bundled FFmpeg's NVENC fails every NVENC
@@ -199,6 +201,8 @@ function App() {
   const {
     showConsole,
     setShowConsole,
+    showPreview,
+    setShowPreview,
     showAbout,
     setShowAbout,
     showSettings,
@@ -262,6 +266,7 @@ function App() {
     colorimetry: colorimetrySettings,
     segment,
     whenConfigSaved: workflow.whenConfigSaved,
+    previewEnabled: showPreview,
   });
 
   useDiscordActivity({
@@ -326,6 +331,7 @@ function App() {
   } = useBatchConfig({
     getWorkflow: () => toQueueWorkflow(viewOf(workflow.getState())),
     showQueue: queueStore.showQueue,
+    whenReady: workflow.whenReady,
     onAddToQueue: (videoPaths, itemWorkflow, output) => {
       addToQueue(videoPaths, itemWorkflow, output);
       // Adding several videos opens the queue; it has to set the project's
@@ -335,6 +341,18 @@ function App() {
     onLoadVideoInfo: loadProjectVideo,
     onLog: addConsoleLog,
   });
+
+  const handleApplyToPending = async () => {
+    const count = queue.filter(item => item.status === 'pending').length;
+    const currentSettings = toQueueWorkflow(viewOf(workflow.getState()));
+    if (!count || !(await ask({
+      title: 'Apply settings to pending videos',
+      message: `Replace the settings of ${count} pending video(s) with the currently shown models, filters, encoding, trim and track selections? Processing and finished videos keep their settings.`,
+      confirmLabel: 'Apply to all pending',
+    }))) return;
+    queueStore.applyToPending(currentSettings);
+    addConsoleLog(`Applied current settings to ${count} pending video(s)`);
+  };
 
   // Queue operations hook
   const {
@@ -717,7 +735,17 @@ function App() {
     isOpening: isOpeningChainPreview,
   } = chainPreview;
 
+  useEffect(() => {
+    void window.electronAPI.setPreviewEnabled(showPreview).catch(error => addConsoleLog(`Preview setting: ${error}`));
+    if (!showPreview) {
+      setActiveFilterEditorId(null);
+      void closeChainPreview();
+      updatePreviewFrame(null);
+    }
+  }, [showPreview, closeChainPreview, addConsoleLog, updatePreviewFrame]);
+
   const handleToggleChainPreview = useCallback(() => {
+    setShowPreview(true);
     // Mid-open the button is a cancel: a preflight can sit in an engine build
     // for minutes, and there is otherwise no way out of it.
     if (isOpeningChainPreview) {
@@ -798,6 +826,7 @@ function App() {
       return;
     }
 
+    setShowPreview(true);
     setActiveFilterEditorId(filter.id);
 
     const frameNumber = playheadFrame ?? 0;
@@ -927,15 +956,8 @@ function App() {
     
     // Prevent processing when a filter's effective backend needs a built
     // engine but the filter still points at a raw ONNX model
-    const hasUnbuiltModel = filters.some(f =>
-      f.enabled &&
-      f.filterType === 'aiModel' &&
-      f.modelPath &&
-      f.modelPath.toLowerCase().endsWith('.onnx') &&
-      getBackendDescriptor(resolveFilterBackend(f.backend, defaultBackend)).requiresEngineBuild
-    );
-    if (hasUnbuiltModel) return true;
-    
+    if (hasUnbuiltEngineModel(filters, defaultBackend)) return true;
+
     // Allow processing without AI model as long as there's at least one enabled filter or no filters at all
     // Allow if there are no filters (pure processing)
     if (filters.length === 0) return false;
@@ -976,6 +998,8 @@ function App() {
         showQueue={queueStore.showQueue}
         queueCount={queue.length}
         onToggleQueue={handleToggleQueue}
+        showPreview={showPreview}
+        onTogglePreview={() => setShowPreview(!showPreview)}
         isReloading={isReloading}
         privacyMode={privacyMode}
         onSettingsClick={() => setShowSettings(true)}
@@ -1013,9 +1037,6 @@ function App() {
           onBuildModel={handleBuildModel}
         />
 
-        {/* Notification Bar for a missing DLSS 5 runtime */}
-        <DlssRuntimeNotification filters={filters} />
-
         {/* Main Content */}
         <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Queue — a pane you show or hide, not a mode that reshapes the window */}
@@ -1037,15 +1058,16 @@ function App() {
               onOpenItemFolder={handleOpenQueueItemFolder}
               onDropFiles={handleBatchFiles}
               onDuplicateItem={duplicateQueueItem}
+              onApplyToPending={handleApplyToPending}
             />
           </div>
         )}
         {/* Flush panes separated by hairlines — the strip and action bar are
             edge-to-edge, so the middle is too. No floating cards. */}
-        <div className="flex-1 min-w-0 flex overflow-hidden">
+        <div className="flex-1 min-w-0 flex overflow-hidden relative">
               {/* Preview pane — the console opens over it, the scrubber sits under it */}
-              <div className="relative flex flex-col flex-1 min-w-0 min-h-0">
-                  <VideoPreviewPanel
+              <div role="region" aria-label="Video preview panel" className="relative flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
+                  {showPreview ? <VideoPreviewPanel
                     previewFrame={previewFrame}
                     completedVideoPath={completedVideoPath}
                     completedVideoBlobUrl={completedVideoBlobUrl}
@@ -1098,9 +1120,9 @@ function App() {
                       onSelect: chainPreview.select,
                       onReload: () => void chainPreview.open(),
                     } : null}
-                  />
+                  /> : <div className="flex-1 min-h-0 grid place-items-center text-ink-500 text-sm">Preview is disabled</div>}
 
-                  {colorGrade.editor && (
+                  {showPreview && colorGrade.editor && (
                     <ColorGradeDock
                       values={colorGrade.values}
                       scopeSample={scopeSample}
@@ -1119,7 +1141,7 @@ function App() {
                     />
                   )}
 
-                  <Scrubber
+                  {showPreview && <Scrubber
                     videoInfo={videoInfo}
                     segment={segment}
                     isProcessing={isProcessing}
@@ -1141,14 +1163,16 @@ function App() {
                       loop: chainPreview.playback.loop,
                       onLoopChange: chainPreview.playback.setLoop,
                     }}
-                  />
+                  />}
 
                   <ConsoleDrawer
                     open={showConsole}
                     onClose={handleCloseConsole}
+                    onClear={() => { void clearConsole(); }}
                     consoleOutput={consoleOutput}
                     consoleEndRef={consoleEndRef}
                     privacyMode={privacyMode}
+                    fill={!showPreview}
                   />
               </div>
 
@@ -1160,14 +1184,14 @@ function App() {
                 aria-label="Resize the settings column"
                 title="Drag to resize the settings column"
                 className={`w-[5px] flex-shrink-0 cursor-ew-resize relative transition-colors ${
-                  gradeFocus ? 'hidden' : ''
+                  (gradeFocus && showPreview) ? 'hidden' : ''
                 } ${isResizingSettings ? 'bg-accent-500/30' : 'hover:bg-accent-500/20'}`}
               >
                 <span className="pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-ink-800" aria-hidden="true" />
               </div>
 
               {/* Folded settings — the grade has the window; this brings it back */}
-              {gradeFocus && (
+              {gradeFocus && showPreview && (
                 <button
                   type="button"
                   onClick={() => setSettingsRevealed(true)}
@@ -1183,7 +1207,7 @@ function App() {
               )}
 
               {/* Settings column — pixel width, dragged at its left edge */}
-                <div ref={rightPanelRef} style={{ width: settingsWidth }} className={`flex-shrink-0 flex-col overflow-y-auto overflow-x-hidden min-h-0 bg-ink-950 ${gradeFocus ? 'hidden' : 'flex'}`}>
+                <div ref={rightPanelRef} style={{ width: settingsWidth }} className={`flex-shrink-0 flex-col overflow-y-auto overflow-x-hidden min-h-0 bg-ink-950 ${gradeFocus && showPreview ? 'hidden' : 'flex'}`}>
                   {/* Video Input */}
                   <VideoInputPanel
                     editingLabel={queueEditingLabel}
@@ -1221,6 +1245,7 @@ function App() {
                     onSaveTemplate={saveTemplate}
                     onDeleteTemplate={deleteTemplate}
                     onRestoreTemplates={restoreTemplates}
+                    onRefreshTemplates={loadTemplates}
                     onOpenFilterEditor={handleOpenFilterEditor}
                     lut={lutPanel}
                     beginStepPatch={beginStepPatch}
@@ -1243,6 +1268,8 @@ function App() {
                     onProcessingFormatChange={handleUpdateProcessingFormat}
                     onBenchmarkModeChange={setBenchmarkMode}
                   />
+
+                  <MediaTracksPanel video={videoInfo} encoding={encoding} onChange={handleUpdateEncoding} disabled={isProcessing} outputFormat={outputFormat} />
 
                   {/* Video Info */}
                   <VideoInfoPanel
@@ -1301,6 +1328,7 @@ function App() {
 
       {/* Modals */}
       <AppModals
+        onModelsUpdated={async () => { await loadModels(); await loadUninitializedModels(); }}
         showImportModal={showImportModal}
         onCloseImportModal={() => closeModalWithFocusRestore(() => setShowImportModal(false))}
         isImporting={isImporting}

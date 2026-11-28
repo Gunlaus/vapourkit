@@ -1,5 +1,66 @@
 # Changelog
 
+## Unreleased
+
+### Experimental GPU video pipeline
+- Discover and cache spatial alignment for supported RGB image/temporal models, then apply a shared dynamic padding/cropping adapter without architecture-name rules or source edits. Honor declared border contracts and retain real-engine validation.
+- Include a same-engine diagnostic comparing the v2.1.0 direct inference call, the managed loader, and requested CUDA Graphs in isolated processes.
+- Isolate native engine caches by the full model identity, including external weights, to prevent different weights with the same graph from sharing an engine.
+- Add an optional Windows x64 NVEncC backend for full-video, single RGB image-model workflows with Simple NVIDIA encoding settings. The standard VapourSynth path remains the default.
+- Install checksum-pinned native dependencies in an isolated folder; cache FP32-boundary ONNX adapters without editing source models or changing their internal weights.
+- Preserve selected audio/subtitle tracks and subtitle attachments, check the completed output before publication, and report native throughput and whether GPU tensor sharing was confirmed.
+- Save valid processing-performance settings automatically, including when closing the settings panel.
+
+### Processing performance
+- Enable TensorRT CUDA Graph replay with a normal-inference fallback when graph setup is unsupported, and a switch for comparison or troubleshooting.
+- Limit encoding-preview generation by elapsed time before scaling and JPEG compression; keep output encoding settings unchanged.
+- Expose frame-request, CPU-thread and frame-cache overrides, preserving runtime defaults at zero and user-kept templates on disk.
+- Reuse unchanged source metadata briefly across preview and queue setup; invalidate changed files and retry failed probes.
+
+### Browse more VapourSynth filters
+- The VS filter picker can browse VSRepo, show API/platform compatibility and source links, and install compatible plugins or scripts with their dependencies.
+- Downloads are hash-checked and tested in a temporary Python process before publication. Existing files are preserved, verified dependencies are reused, and app-managed inference packages and BestSource stay under Vapourkit's installer.
+- The browser uses the picker layout: filter by status, type and category, sort by name, release date, installed or compatible first, and see why a package can't be installed. Packages with loose registry metadata (such as the NNEDI3 weights) are no longer dropped, so their dependents install.
+
+### Guided encoding and container tracks
+- Simple encoding exposes bitrate/quality, keyframes, audio and codec-specific settings; Advanced starts from the current Simple controls.
+- Select which source audio/subtitle tracks to retain, with selections saved in workflows and queue items.
+- NVENC capability checks explain common failures and offer CPU recovery. A failed default-options preflight is advisory, with an explicit Continue anyway option.
+
+### Preview and queue controls
+- Toggle preview without losing the pane, choose encoding-preview height/FPS, and keep the console within the preview area.
+- Apply current settings to all pending jobs; new queue items wait for saved settings to load. Canceling a model/filter picker leaves no empty chain item, and output naming avoids collisions.
+- Session restoration remains the default; fresh startup is an opt-in preference.
+
+### Processing diagnostics
+- Validate the Matroska stream header and parse FFmpeg's structured progress. Report the underlying VapourSynth error when a producer exits before writing video.
+- Track actual processing outcomes, validate imported filter declarations, cache Linux site-packages discovery, and support the packaged application's --version command.
+
+### Build verification
+- Build Windows x64 installer and portable packages in CI, print their SHA256 hashes, and smoke-test the packaged executable's --version command.
+- Run model unit tests against local generated fixtures when present. Live registry/model downloads and benchmarks remain outside default CI.
+- Keep Windows basename handling consistent in the cross-platform unit suite.
+
+### Models supplied with the app
+- Browse the model catalog bundled with this release. Every installation requires consent showing the creator, source, linked licence, download size and file hashes.
+- Verify model downloads, retain previous model versions and workflows, and record installed model versions in installed-components.json.
+- The catalog installs models only. It does not fetch a remote catalog or replace FFmpeg, Python runtimes, filters or pinned dependencies.
+
+### Model preparation
+- TensorRT engines stay dynamic by default: build a model once with a shape range, and that one engine serves every resolution inside it. Processing waits until each TensorRT model is built, and a resolution outside the range names the range and asks for a rebuild. Static single-resolution engines remain an explicit choice in the build dialog.
+- Import complete ONNX packages (external weights included) and resolve symbolic RGB layouts. Catalog models go through the same build step.
+- Validate each newly built engine through real inference before it replaces the working one, keep the old engine on failure, and serialize builds of one engine across processes.
+- Cast to the engine's own input type from its build manifest, and pad to a model's spatial multiple, cropping the result.
+- Identify CUDA's selected visible GPU without requiring an active context. Keep same-named model packages' metadata separate.
+- Compare against a pinned CPU ONNX Runtime in a separate process with a 60-second timeout, bounded input/output data, and limited CPU threads. Reference failures are explicit; generic vs-mlrt RIFE/DPIR builds retain their existing path.
+
+### Choose which GPU runs inference
+Settings → Inference Backend → GPU picks the GPU, and every backend uses it. Until now each backend took its API's first GPU, and those differ: DirectML and NCNN often landed on a laptop's integrated GPU while TensorRT used the NVIDIA one.
+- TensorRT, MIGraphX and PyTorch-based filters see only the chosen GPU, so engine and program builds happen on it too
+- DirectML and NCNN are given the chosen GPU's number in their own API. Custom filters that call `vk_backend()` follow the setting as well
+- If a backend can't run on the chosen GPU (TensorRT on an AMD or Intel GPU, say), Settings says so and that backend keeps its default GPU
+- Automatic, the default, keeps the old behaviour
+
 ## 2.1.0
 
 ### Updating no longer costs you a re-setup
@@ -16,7 +77,6 @@ Until now, installing a new Vapourkit over an old one deleted the whole `data` f
   - **Filters you have edited** are never changed without asking. If the release changed a filter you edited, the notice offers *Use new version* or *Keep mine*. If it dropped one, the notice offers *Remove* or *Keep*, and names the replacement when the filter was only renamed. Your copy is saved to `data\config\template-backups` before anything replaces or removes it. An edit made to a filter the release didn't change is left alone and not mentioned
   - **Filters you deleted** stay deleted. Updates used to put them back
   - **Python packages** are checked against the list this version installs. Anything missing or below its minimum version is installed: this release, `vapoursynth-timecube` (fast LUTs) and `vs_undistort>=2.3.1`. This needs an internet connection once. If it fails, the app still starts and tries again a day later
-  - **Vapourkit's own DLSS plugin** (`vsdlssnr.dll`) is replaced when the bundled build differs
   - **VapourSynth scripts** (the Hybrid scripts and the bundled script pack) are versioned too. An update replaces the ones you haven't edited when a release changes them, keeps any you edited and lists them in the notice, and downloads nothing when nothing changed. Reinstalling plugins restores every shipped script, saving your edited ones to `data\config\script-backups` first
   - **Saved workflows are never touched**: each step keeps its own copy of the filter's code
   - How it knows: `data\config\installed-components.json` records the version of every filter, plugin and script Vapourkit put into your install, so later updates can tell its files from your changes
@@ -68,15 +128,6 @@ Until now, installing a new Vapourkit over an old one deleted the whole `data` f
 - **Linux:** needs ROCm with MIGraphX installed on the system (`migraphx-driver` on `PATH`, or under `$ROCM_PATH`/`/opt/rocm`)
 - Models whose input is 5-D (some multi-frame VSR architectures) aren't supported by MIGraphX and say so; 4-D models, including frame-stacked VSR, work
 - Not yet tested on AMD hardware
-
-### DLSS Neural Uplift (NVIDIA)
-- New filter backed by NVIDIA's DLSS-NR model, with Vapourkit's own VapourSynth plugin (`vsdlssnr.dll`, bundled)
-- It needs `nvngx_dlssnr.dll`, which NVIDIA doesn't distribute on its own (it ships inside games that use DLSS 5). Import your copy with the file picker, either from the Plugins modal or from the bar that appears when a workflow needs it. The picker checks you chose the right DLL and not one of its lookalikes
-- About 2x faster than the first build: 4K goes from ~19.5 to ~37 fps, and 1440p from ~34 to ~53 fps (RTX 5080)
-- Optional motion vectors and depth inputs, plus automatic motion estimation on the GPU (on by default). A Vulkan backend is available and off by default
-- `working_scale` runs the model on a downscaled copy and puts the detail back. Measured at 4K: ~26 fps at 0.75 and ~31 fps at 0.5, against ~17 at 1.0. Check faces and fine texture when using it
-- Fixed several filter instances breaking each other (e.g. a preview and an encode at once)
-- The official DLL is Blackwell-only. The filter no longer claims RTX 20 to 40 series can't work with it
 
 ### Queue
 - **Fixed: filters disappearing after a restart.** Opening the queue sets the project's chain aside and editing a queue item shows that item's chain; the set-aside copy was only kept in memory, so restarting with the queue open and closing it left the item's chain in place of the project's. It is now kept across restarts

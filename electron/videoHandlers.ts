@@ -1,4 +1,10 @@
-import { ipcMain, BrowserWindow, shell, MessageChannelMain, type MessagePortMain } from 'electron';
+import { useNativeShaders } from './shaderRouting';
+import { nvencRuntimeStatus } from './nvencRuntime';
+import { nvencPreflight } from './nvencPreflight';
+import { NvencExecutor } from './nvencExecutor';
+import { nvencEncoderOf } from './encodingSupport';
+import { setPreviewEnabled } from './previewSettings';
+import { ipcMain, BrowserWindow, shell, dialog, MessageChannelMain, type MessagePortMain } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
@@ -34,7 +40,7 @@ import {
 
 /** A processing run: its executor and its per-item log. */
 interface UpscaleJob {
-  executor: UpscaleExecutor;
+  executor: UpscaleExecutor | NvencExecutor;
   log: QueueItemLogger;
 }
 
@@ -48,7 +54,7 @@ interface UpscaleStop {
  * Runs that were cancelled and are letting ffmpeg finish what it has. Quitting
  * kills them; each leaves the set when its run settles.
  */
-const drainingUpscales = new Set<UpscaleExecutor>();
+const drainingUpscales = new Set<UpscaleExecutor | NvencExecutor>();
 
 const upscaleJob = new JobSlot<UpscaleJob, UpscaleStop>((job, { mode, note }) => {
   job.log.write(note);
@@ -161,6 +167,8 @@ export function registerVideoHandlers(
    * app's build banner. A cancel, or a newer evaluation, kills it, and the
    * result then carries the error that left.
    */
+  handleValidated('set-preview-enabled', z.boolean(), async enabled => { setPreviewEnabled(enabled); return { success: true }; });
+
   const evaluateScript = async (scriptPath: string): Promise<OutputInfo> => {
     const vspipePath = dependencyManager.getVSPipePath();
     const extractor = new VapourSynthInfoExtractor(
@@ -214,7 +222,8 @@ export function registerVideoHandlers(
         scanType: metadata.scanType,
         colorSpace: metadata.colorSpace,
         duration: metadata.duration,
-        frameCount: frameCount
+        frameCount: frameCount,
+        tracks: metadata.tracks,
       };
 
       logger.info(`Video info: ${info.name}, ${info.sizeFormatted}, ${metadata.resolution || 'unknown resolution'}, ${metadata.fps ? metadata.fps + ' fps' : 'unknown fps'}, ${metadata.pixelFormat || 'unknown format'}${frameCount ? `, ${frameCount} frames` : ''}`);
@@ -342,13 +351,16 @@ export function registerVideoHandlers(
 
       const vspipePath = dependencyManager.getVSPipePath();
       const pythonPath = dependencyManager.getPythonExecutablePath();
-      const executor = new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
+      const nativeRequest = { inputPath: videoPath, outputPath, filters: filters ?? [], defaultBackend, encoding: configManager.getEncodingSettings(), processingFormat: configManager.getProcessingFormat(), colorimetry: configManager.getColorimetrySettings(), segment, benchmark: benchmarkMode };
+      const nativeRequested = useNativeShaders(nativeRequest, (await nvencRuntimeStatus()).installed);
+      let executor = nativeRequested ? new NvencExecutor(mainWindow, pythonPath) : new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
 
       // The job is in the slot from here on, so a cancel at any later await
       // reaches it. Any previous run, and any validation, is stopped first.
       infoJob.stop();
+      const context = { executor, log: itemLogger };
       const job = upscaleJob.start(
-        { executor, log: itemLogger },
+        context,
         { mode: 'kill', note: 'Processing stopped: a new run started' },
       );
 
@@ -387,7 +399,40 @@ export function registerVideoHandlers(
         });
       }
       
+      let temporaryScript: string | null = null;
       try {
+        if (executor instanceof NvencExecutor && !await executor.supportsShaderSource(videoPath)) {
+          if (executor.isStopped) return { success: false, error: 'Canceled' };
+          executor = new UpscaleExecutor(vspipePath, pythonPath, mainWindow);
+          context.executor = executor;
+          qlog('Shader processing: standard pipeline selected for source compatibility.');
+        }
+        executor.onDiagnostic = message => itemLogger.write(message);
+        if (executor instanceof NvencExecutor) {
+          qlog('Execution backend: NVEncC GPU (experimental)');
+          if (!isUpscaling && !filters?.some(f => f.enabled && f.filterType === 'shader')) throw new Error('Enable model processing or add a GLSL shader for the NVEncC GPU path.');
+          await executor.execute({ inputPath: videoPath, outputPath, filters: filters ?? [], defaultBackend,
+            encoding: configManager.getEncodingSettings(), processingFormat: configManager.getProcessingFormat(),
+            colorimetry: configManager.getColorimetrySettings(), segment, benchmark: benchmarkMode },
+            file => configManager.isModelFp32(file), file => configManager.getModelType(file));
+          qlog('Processing completed successfully');
+          return { success: true, outputPath };
+        }
+        const nvenc = nvencEncoderOf(configManager.getFfmpegArgs());
+        if (nvenc && !benchmarkMode) {
+          const ffmpeg = FFmpegManager.getFFmpegPath();
+          if (!ffmpeg) throw new Error('FFmpeg is missing. Repair it using Start Setup in Settings.');
+          await nvencPreflight(ffmpeg, nvenc, configManager.getProcessingFormat(), () => executor.isStopped, async support => {
+            const options = {
+              type: 'warning' as const, title: 'NVENC capability test failed',
+              message: support.message,
+              detail: 'This test uses default encoder options, not your full settings. Your render may still work. Continue with your selected settings, or cancel and choose CPU encoding in Output settings.\n\n' + (support.details ?? ''),
+              buttons: ['Cancel', 'Continue anyway'], defaultId: 0, cancelId: 0,
+            };
+            const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+            return result.response === 1;
+          });
+        }
         // Generate VapourSynth script
         qlog('Generating VapourSynth script');
         
@@ -398,6 +443,7 @@ export function registerVideoHandlers(
         }
 
         const scriptPath = await scriptGenerator.generateScript(config);
+        temporaryScript = scriptPath;
         qlog(`Script generated: ${scriptPath}`);
 
         // Log script content to per-item log for troubleshooting
@@ -454,10 +500,6 @@ export function registerVideoHandlers(
         qlog('Starting execution');
         await executor.execute(scriptPath, outputPath, videoPath, { source: sourceProbe.streams, output: outputInfo }, segment?.enabled ? segment : undefined, fps, benchmarkMode);
 
-        // Cleanup
-        qlog('Cleaning up script file');
-        await scriptGenerator.cleanupScript(scriptPath);
-
         qlog('Processing completed successfully');
         return { success: true, outputPath };
       } catch (error) {
@@ -469,9 +511,13 @@ export function registerVideoHandlers(
           itemLogger.error(`Processing failed: ${errorMsg}`);
         } else {
           qerror(`Processing failed: ${errorMsg}`);
+          if (executor instanceof NvencExecutor && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('upscale-progress', {
+            type: 'error', currentFrame: 0, totalFrames: 0, fps: 0, percentage: 0, message: errorMsg,
+          });
         }
-        return { success: false, error: errorMsg };
+        return { success: false, error: executor.isStopped ? 'Canceled' : errorMsg };
       } finally {
+        if (temporaryScript) await scriptGenerator.cleanupScript(temporaryScript).catch(error => logger.warn('Script cleanup deferred:', error));
         upscaleJob.release(job);
         drainingUpscales.delete(executor);
         itemLogger.close();
@@ -997,6 +1043,7 @@ function buildScriptConfig(
     filters: request.filters ?? [],
     numStreams: request.numStreams || 2,
     outputFormat: configManager.getProcessingFormat(),
+    performance: configManager.getPipelineSettings?.(),
     segment: request.segment?.enabled ? request.segment : undefined,
     ...options,
   };

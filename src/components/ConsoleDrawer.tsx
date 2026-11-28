@@ -4,24 +4,37 @@
 // its own title row. Now it costs nothing until you open it, and when you do
 // it borrows from the preview rather than from the settings column.
 
-import { memo, useEffect, useRef } from 'react';
-import { Terminal, X } from 'lucide-react';
+import { memo, useEffect, useLayoutEffect, useRef } from 'react';
+import { Terminal, X, Trash2 } from 'lucide-react';
 
 interface ConsoleDrawerProps {
   open: boolean;
   onClose: () => void;
+  onClear: () => void;
   consoleOutput: string[];
   consoleEndRef: React.RefObject<HTMLDivElement | null>;
   privacyMode: boolean;
+  fill?: boolean;
 }
 
 export const ConsoleDrawer = memo(function ConsoleDrawer({
   open,
   onClose,
+  onClear,
   consoleOutput,
   consoleEndRef,
   privacyMode,
+  fill = false,
 }: ConsoleDrawerProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const following = useRef(true), previouslyOpen = useRef(false);
+  useLayoutEffect(() => {
+    const opening = open && !previouslyOpen.current;
+    previouslyOpen.current = open;
+    if (opening) following.current = true;
+    if (open && following.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [open, consoleOutput, fill]);
+
   // Turning privacy mode on closes the console — log lines carry file paths.
   const prevPrivacyModeRef = useRef(privacyMode);
   useEffect(() => {
@@ -42,7 +55,7 @@ export const ConsoleDrawer = memo(function ConsoleDrawer({
 
   return (
     // bottom-10 keeps the scrubber visible and usable while the console is open
-    <div className="absolute inset-x-0 bottom-10 z-20 h-[280px] flex flex-col bg-ink-900/97 backdrop-blur-sm border-t border-ink-750 overflow-hidden">
+    <div role="region" aria-label="Console" className={`absolute inset-x-0 z-20 flex flex-col bg-ink-900/97 backdrop-blur-sm border-t border-ink-750 overflow-hidden ${fill ? 'inset-y-0' : 'bottom-10 h-[280px] max-h-[calc(100%_-_2.5rem)]'}`}>
       <div className="h-8 flex-shrink-0 flex items-center gap-2 px-3 border-b border-ink-800">
         <Terminal className="w-3.5 h-3.5 text-accent-500" />
         <span className="font-display text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-300">
@@ -50,6 +63,7 @@ export const ConsoleDrawer = memo(function ConsoleDrawer({
         </span>
         <span className="text-[11px] text-ink-500 tabular-nums">{consoleOutput.length} lines</span>
         <div className="flex-1" />
+        <button type="button" onClick={onClear} aria-label="Clear console" title="Clear displayed console; keeps the diagnostic log file" className="text-ink-400 hover:text-ink-200"><Trash2 className="w-3.5 h-3.5" /></button>
         <button
           onClick={onClose}
           aria-label="Close console"
@@ -60,7 +74,7 @@ export const ConsoleDrawer = memo(function ConsoleDrawer({
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed bg-ink-950/60">
+      <div ref={scrollRef} onScroll={() => { const el = scrollRef.current; if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24; }} className="flex-1 min-h-0 overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed bg-ink-950/60">
         {consoleOutput.length === 0 ? (
           <p className="text-ink-600">Nothing logged yet.</p>
         ) : (

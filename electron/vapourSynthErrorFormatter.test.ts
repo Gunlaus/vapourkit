@@ -11,9 +11,17 @@ describe('formatVapourSynthValidationError', () => {
       'Python exception: ModuleNotFoundError: No module named \'vs_undistort\'',
     ].join('\r\n');
 
-    expect(formatVapourSynthValidationError(output)).toBe(
-      "Script evaluation failed:\nPython exception: ModuleNotFoundError: No module named 'vs_undistort'",
-    );
+    const message = formatVapourSynthValidationError(output);
+    expect(message).toContain('Plugins');
+    expect(message).toContain('Partial reinstall');
+    expect(message).toContain("Script evaluation failed:\nPython exception: ModuleNotFoundError: No module named 'vs_undistort'");
+  });
+
+  it('identifies missing application modules without recommending plugin reinstall', () => {
+    const message = formatVapourSynthValidationError("ModuleNotFoundError: No module named 'vk_model_runtime'");
+    expect(message).toContain('application-file or Python search-path problem');
+    expect(message).not.toContain('Partial reinstall');
+    expect(message).not.toContain('Open Plugins');
   });
 
   it('preserves other warnings that may help diagnose the failure', () => {
@@ -49,4 +57,14 @@ describe('formatVapourSynthValidationError', () => {
       'Python exception: No attribute with the name ort exists. Did you mistype a plugin namespace or forget to install a plugin?',
     );
   });
+});
+
+
+it('prioritizes the script exception over an unrelated API4 plugin autoload failure', () => {
+  const startup = 'Critical: Core only supports API R4.2 but the loaded plugin requires API R4.3; Name: Hysteresis filter.';
+  const failure = 'Script evaluation failed:\nPython exception: The RTX builder did not publish a matching validated engine.';
+  const result = formatVapourSynthValidationError(`${startup}\n[vk-build] progress 100\n${failure}`);
+  expect(result.startsWith(failure)).toBe(true);
+  expect(result).toContain(startup);
+  expect(result).toContain('[vk-build] progress 100');
 });

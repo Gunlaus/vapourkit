@@ -22,6 +22,10 @@ describe('the vspipe side', () => {
   it('writes the first output as Matroska, which carries per-frame timestamps', () => {
     expect(vspipeArgs('C:/s.vpy')).toEqual(['-c', 'mkv', '--outputindex', '0', 'C:/s.vpy', '-']);
   });
+  it('bounds explicit frame requests and keeps the runtime default at zero', () => {
+    expect(vspipeArgs('s.vpy', 4)).toEqual(['-c', 'mkv', '--outputindex', '0', '--requests', '4', 's.vpy', '-']);
+    for (const value of [0, -1, 33, 1.5, NaN]) expect(vspipeArgs('s.vpy', value)).not.toContain('--requests');
+  });
 });
 
 describe('the ffmpeg encode', () => {
@@ -29,7 +33,7 @@ describe('the ffmpeg encode', () => {
     const args = build();
     const pipe = args.indexOf('pipe:0');
     expect(args.slice(0, pipe + 1)).toEqual([
-      '-hide_banner', '-f', 'matroska',
+      '-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', '-f', 'matroska',
       '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
       '-i', 'pipe:0',
     ]);
@@ -40,7 +44,7 @@ describe('the ffmpeg encode', () => {
   it('tags no YUV colour on an RGB output, float RGB included', () => {
     for (const pixelFormat of ['RGB24', 'RGBS', 'RGBH']) {
       const args = build({ outputInfo: { ...cfr, pixelFormat } });
-      expect(args.slice(0, args.indexOf('pipe:0') + 1)).toEqual(['-hide_banner', '-f', 'matroska', '-i', 'pipe:0']);
+      expect(args.slice(0, args.indexOf('pipe:0') + 1)).toEqual(['-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', '-f', 'matroska', '-i', 'pipe:0']);
     }
   });
 
@@ -86,13 +90,22 @@ describe('the ffmpeg encode', () => {
     expect(valueOf(args, '-movflags')).toBe('+faststart');
     expect(args.slice(args.indexOf('C:/out.mp4') - 1)).toEqual([
       '-y', 'C:/out.mp4',
-      '-map', '0:v:0', '-vf', 'fps=1,scale=-2:720', '-f', 'image2pipe', '-c:v', 'mjpeg', '-pix_fmt', 'yuvj422p', '-q:v', '1', 'pipe:1',
+      '-map', '0:v:0', '-vf', "select='if(gte(abs(time(0)-ld(0)),1)*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,1)),st(0,time(0))*0+1,0)',scale=-2:720", '-fps_mode:v:0', 'vfr', '-f', 'image2pipe', '-c:v', 'mjpeg', '-pix_fmt', 'yuvj422p', '-q:v', '1', 'pipe:1',
     ]);
+  });
+
+  it('changes only the preview output when preview speed changes', () => {
+    const args = build({ previewFps: 5, previewHeight: 360 });
+    expect(args.slice(0, args.indexOf('C:/out.mp4') + 1)).toEqual(build().slice(0, build().indexOf('C:/out.mp4') + 1));
+    expect(args.join(' ')).toContain("select='if(gte(abs(time(0)-ld(0)),0.2)*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,0.2)),st(0,time(0))*0+1,0)',scale=-2:360");
+    const without = build({ previewEnabled: false });
+    expect(without).not.toContain('image2pipe');
+    expect(without[without.length - 1]).toBe('C:/out.mp4');
   });
 
   it('decodes the pipe into the null muxer in benchmark mode', () => {
     expect(build({ benchmarkMode: true, outputInfo: { ...cfr, pixelFormat: 'RGBS' } })).toEqual([
-      '-hide_banner', '-f', 'matroska', '-i', 'pipe:0', '-f', 'null', '-',
+      '-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', '-f', 'matroska', '-i', 'pipe:0', '-f', 'null', '-',
     ]);
   });
 });

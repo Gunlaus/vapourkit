@@ -1,3 +1,4 @@
+import { ShaderSelectorModal } from './ShaderSelectorModal';
 import { Fragment, memo, useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Filter as LucideFilter, Info, Sparkles, ToggleLeft, ToggleRight, ChevronsDownUp, ChevronsUpDown, Film } from 'lucide-react';
 import type { BackendId, FilterBackend, Filter, FilterTemplate, ModelFile } from '../electron.d';
@@ -33,6 +34,7 @@ interface DynamicFilterPanelProps {
   onDeleteTemplate?: (name: string) => Promise<boolean>;
   /** Puts back deleted built-in filters; answers the files restored */
   onRestoreTemplates?: () => Promise<string[]>;
+  onRefreshTemplates?: () => Promise<void>;
   onImportClick?: () => void;
   onModelsUpdated?: () => Promise<void>;
   /** Opens a visual editor declared by the selected .vkfilter template. */
@@ -99,6 +101,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
   onSaveTemplate,
   onDeleteTemplate,
   onRestoreTemplates,
+  onRefreshTemplates,
   onImportClick,
   onModelsUpdated,
   onOpenFilterEditor,
@@ -114,7 +117,10 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
   const [hoveredDragHandle, setHoveredDragHandle] = useState<string | null>(null);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [newlyDuplicatedId, setNewlyDuplicatedId] = useState<string | null>(null);
+  const [draftStep, setDraftStep] = useState<Filter | null>(null);
+  const draftStepRef = useRef<Filter | null>(null);
   const [showFilterSelector, setShowFilterSelector] = useState<string | null>(null);
+  const [showShaderSelector, setShowShaderSelector] = useState<string | null>(null);
   const [showModelSelector, setShowModelSelector] = useState<string | null>(null);
   /** Side chains folded shut in the rail, by Load Video id. */
   const [collapsedChains, setCollapsedChains] = useState<Set<string>>(new Set());
@@ -162,6 +168,11 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
     if (syncedEpochRef.current !== chainEpoch) {
       syncedEpochRef.current = chainEpoch;
       dirtyCodeRef.current.clear();
+      draftStepRef.current = null;
+      setDraftStep(null);
+      setShowFilterSelector(null);
+      setShowModelSelector(null);
+      setShowShaderSelector(null);
     }
     const dirty = dirtyCodeRef.current;
     setPendingFilters(normalizeChainOrder(filters).map(filter =>
@@ -222,6 +233,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
    */
   const commitOrder = (updated: Filter[]) => {
     const normalized = normalizeChainOrder(updated);
+    pendingRef.current = normalized;
     setPendingFilters(normalized);
     onFiltersChange(normalized);
     return normalized;
@@ -258,12 +270,27 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
     ...fields,
   });
 
-  /** Adds a step and opens it, with its picker over it. */
+  // A picker owns an uncommitted draft. Closing it never changes the chain or undo history.
   const addStep = (step: Filter, openPicker: (id: string) => void) => {
-    commitOrder([...pendingFilters, step]);
-    setExpandedFilters(prev => new Set([...prev, step.id]));
+    draftStepRef.current = step;
+    setDraftStep(step);
     setShowAddMenu(false);
     openPicker(step.id);
+  };
+  const closePicker = () => {
+    draftStepRef.current = null;
+    setDraftStep(null);
+    setShowFilterSelector(null);
+    setShowModelSelector(null);
+    setShowShaderSelector(null);
+  };
+  const commitPickedStep = (id: string, fields: Partial<Filter>) => {
+    const draft = draftStepRef.current;
+    if (!draft || draft.id !== id) { patchStep(id, step => ({ ...step, ...fields })); return; }
+    commitOrder([...pendingRef.current, { ...draft, ...fields }]);
+    setExpandedFilters(prev => new Set([...prev, id]));
+    draftStepRef.current = null;
+    setDraftStep(null);
   };
 
   const handleAddCustomFilter = (chain?: string) => {
@@ -332,12 +359,6 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
 
   const handleToggleFilter = (id: string, enabled: boolean) => {
     patchStep(id, f => ({ ...f, enabled }));
-  };
-
-  const handleModelChange = (id: string, modelPath: string) => {
-    const selectedModel = availableModels.find(m => m.path === modelPath);
-    // The step's type is the model's own, from its metadata
-    patchStep(id, f => ({ ...f, modelPath, modelType: selectedModel?.modelType || 'image' }));
   };
 
   const handlePresetChange = (id: string, preset: string) => {
@@ -476,10 +497,12 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
       if (!(await confirmReplaceTemplate(template.name))) return;
 
       if (onSaveTemplate) {
-        await onSaveTemplate(template);
+        const saved = await onSaveTemplate(template);
+        if (!saved) { notify.error('Filter not imported', 'The template could not be saved. Check its variables and editor mapping, then retry.'); return; }
+        notify.info('Filter imported — validate before rendering', result.warnings?.join(' ') || 'External filters may require additional plugins. Validate the workflow and use Plugins → Partial reinstall for bundled dependencies.');
       }
     } catch (err) {
-      notify.error('Import Error', 'Failed to import template. Please check the file format.');
+      notify.error('Import Error', `Could not import the filter: ${err instanceof Error ? err.message : String(err)}. Check the TOML syntax, variable types and editor mapping.`);
       console.error('Import error:', err);
     }
   };
@@ -583,6 +606,8 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
     remove: handleRemoveFilter,
     openModelSelector: setShowModelSelector,
     openFilterSelector: setShowFilterSelector,
+    openShaderSelector: setShowShaderSelector,
+    setShader: (id, shader) => patchStep(id, f => ({ ...f, shader })),
     setBackend: (id: string, backend: FilterBackend) =>
       patchStep(id, f => ({ ...f, backend: backend === 'auto' ? undefined : backend })),
     setStreams: (id: string, numStreams: number | undefined) => patchStep(id, f => ({ ...f, numStreams })),
@@ -670,6 +695,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
   return (
     <>
     <Section
+      headerOverlayActive={showAddMenu}
       title={title}
       meta={pendingFilters.length > 0
         ? `${pendingFilters.filter(f => f.enabled).length}/${pendingFilters.length} on`
@@ -742,6 +768,10 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
                     <LucideFilter className="w-4 h-4 text-ink-400" />
                     VS Filter
                   </button>
+                  <button
+                    onClick={() => addStep(newStep('shader', 'GLSL Shader'), setShowShaderSelector)}
+                    className="w-full px-3 py-1.5 text-left text-[12.5px] hover:bg-ink-800 flex items-center gap-2 text-ink-200 border-b border-ink-800"
+                  ><Sparkles className="w-4 h-4 text-accent-400" />GLSL Shader</button>
                   <button
                     onClick={() => { void handleAddVideoSource(); }}
                     title="Load a second video with its own steps — a side chain another step can read from"
@@ -874,19 +904,26 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
         />
       )}
 
+      {showShaderSelector && <ShaderSelectorModal onClose={closePicker} onSelect={shader => {
+        commitPickedStep(showShaderSelector, { shader, preset: shader.name ?? 'GLSL Shader' });
+      }} />}
+
       {/* Filter Selector Modal */}
       {showFilterSelector && (
         <FilterSelectorModal
           isOpen={true}
-          onClose={() => setShowFilterSelector(null)}
+          onClose={closePicker}
           filterTemplates={filterTemplates}
           currentSelection={pendingFilters.find(f => f.id === showFilterSelector)?.preset || ''}
           onSelectTemplate={(templateName) => {
             if (showFilterSelector) {
-              handlePresetChange(showFilterSelector, templateName);
+              const template = filterTemplates.find(t => t.name === templateName);
+              if (!template && templateName && draftStepRef.current) return;
+              commitPickedStep(showFilterSelector, { preset: templateName, ...fromTemplate(template) });
             }
           }}
           onRestoreTemplates={onRestoreTemplates}
+          onRefreshTemplates={onRefreshTemplates}
           onDeleteTemplate={onDeleteTemplate ? async (name: string) => {
             const success = await onDeleteTemplate(name);
             if (success && showFilterSelector) {
@@ -906,13 +943,15 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
       {showModelSelector && (
         <ModelSelectorModal
           isOpen={true}
-          onClose={() => setShowModelSelector(null)}
+          onClose={closePicker}
           availableModels={availableModels}
-          backendId={resolveFilterBackend(pendingFilters.find(f => f.id === showModelSelector)?.backend, defaultBackend)}
+          backendId={resolveFilterBackend((draftStep?.id === showModelSelector ? draftStep : pendingFilters.find(f => f.id === showModelSelector))?.backend, defaultBackend)}
           currentSelection={pendingFilters.find(f => f.id === showModelSelector)?.modelPath || ''}
           onSelectModel={(modelPath) => {
             if (showModelSelector) {
-              handleModelChange(showModelSelector, modelPath);
+              if (!modelPath && draftStepRef.current) return;
+              const model = availableModels.find(m => m.path === modelPath);
+              commitPickedStep(showModelSelector, { modelPath, modelType: model?.modelType || 'image' });
             }
           }}
           onImportModel={onImportClick}

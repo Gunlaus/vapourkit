@@ -1,9 +1,12 @@
+import { prepareVsShader } from './shaders';
+import type { ShaderSettings } from './shaderTypes';
 // electron/scriptGenerator.ts
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import { PATHS } from './constants';
-import { getSystemRoot } from './trtexecShim';
+import { ensureEngineBuilderScript, getSystemRoot } from './trtexecShim';
+import { gpuEnvironmentEntries, gpuScriptTarget } from './gpuSelection';
 import { app } from 'electron';
 import { fixAsarPath } from './utils';
 import { configManager } from './configManager';
@@ -13,6 +16,7 @@ import { getProvider } from './providers/registry';
 import type { InferenceProvider } from './providers/types';
 import { parseReferenceVideo } from './referenceVideo';
 import { timecodesPathFor } from './sourceTiming';
+import { pipelineSettingsSchema, type PipelineSettings } from './pipelineSettings';
 import {
   layoutChains,
   resolveReference,
@@ -53,11 +57,11 @@ const STAGE_REFERENCE = /\{\{\s*stage\s*:\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 const STAGES = 'VK_STAGES';
 
 /** The shared runtime every generated script imports (include/, copied to data/config/). */
-const RUNTIME_FILE = 'vk_runtime.py';
+const RUNTIME_FILES = ['vk_runtime.py', 'vk_gpus.py'];
 
 /** The helpers a generated script imports from it. */
 const RUNTIME_HELPERS = [
-  'vk_backend', 'vk_migx_model', 'vk_paired_by_time', 'vk_reference_video',
+  'vk_backend', 'vk_device_id', 'vk_migx_model', 'vk_paired_by_time', 'vk_reference_video',
   'vk_open_video', 'vk_conform', 'vk_stage_missing', 'vk_interpolated_timing',
   'vk_timed_output',
 ];
@@ -67,7 +71,7 @@ export interface Filter {
   id: string;
   enabled: boolean;
   /** 'videoSource' is a Load Video step, which heads a side chain (chainGraph.ts). */
-  filterType: 'aiModel' | 'custom' | 'videoSource';
+  filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
   preset: string;
   code: string;
   order: number;
@@ -77,6 +81,7 @@ export interface Filter {
   align?: SideChainAlignment;
   /** The Load Video step whose side chain this step is in; absent for the main chain. */
   chain?: string;
+  shader?: ShaderSettings;
   modelPath?: string;
   modelType?: 'vsr' | 'image';
   /** Inference backend override for this filter; 'auto' or unset inherits the app default. */
@@ -119,6 +124,7 @@ export interface ScriptConfig {
   validationMode?: boolean; // If true, only process first 5 seconds for validation
   sourceFps?: number; // Source video FPS for validation frame calculation
   generatePreviewOutputs?: boolean; // If true, add output nodes after each filter for vs-view
+  performance?: Partial<PipelineSettings>;
 }
 
 export class VapourSynthScriptGenerator {
@@ -162,9 +168,12 @@ export class VapourSynthScriptGenerator {
       if (!declaration) return match;
 
       const value = filter.parameters?.[key] ?? declaration.default;
+      if (value === undefined || (declaration.type && typeof value !== declaration.type) || (typeof value === 'number' && !Number.isFinite(value))) {
+        throw new Error(`Filter "${filter.preset || filter.id}": variable "${key}" needs a valid ${declaration.type || 'number, string or boolean'} value. Edit the filter parameters or correct its [variables.${key}] declaration and re-import it.`);
+      }
       if (typeof value === 'number') return Number.isFinite(value) ? String(value) : match;
       if (typeof value === 'boolean') return value ? 'True' : 'False';
-      if (typeof value === 'string') return pyString(value);
+      if (typeof value === 'string') return JSON.stringify(value);
       return match;
     });
   }
@@ -259,7 +268,8 @@ export class VapourSynthScriptGenerator {
    * to data/config/): VK_BACKEND and VK_BUILD_ENV, which filter code reads,
    * the import of the helpers, and the configure() call that hands the
    * runtime this run's backend, the backend registry's id -> vsmlrt Backend
-   * map, and the paths of the model zoo, trtexec shim and migraphx-driver.
+   * map, the paths of the model zoo, trtexec shim and migraphx-driver, and
+   * the GPU chosen in Settings.
    * Custom .vkfilter code calls vk_backend(...) to get a vsmlrt Backend that
    * follows the backend dropdown.
    */
@@ -289,54 +299,77 @@ export class VapourSynthScriptGenerator {
     code += `vk_runtime.configure(VK_BACKEND, {${backendAttrs}}, VK_BUILD_ENV,\n`;
     code += `                     models_path=${posix(PATHS.VSMLRT_MODELS)},\n`;
     code += `                     trtexec_path=${posix(PATHS.TRTEXEC_SHIM)},\n`;
-    code += `                     migraphx_driver_path=${migraphxDriver})\n\n`;
+    code += `                     migraphx_driver_path=${migraphxDriver},\n`;
+    code += `                     gpu=${gpuScriptTarget()})\n\n`;
     return code;
   }
 
   /**
    * Environment seeded into vsmlrt's TensorRT backend (`custom_env`). vsmlrt
    * spawns the engine builder with `{"CUDA_MODULE_LOADING": "LAZY"}` and nothing
-   * else, which on Windows is not enough for cmd.exe to launch the .cmd shim.
+   * else, which on Windows is not enough for cmd.exe to launch the .cmd shim,
+   * and which would build the engine on another GPU than the one chosen.
    */
   private getEngineBuildEnv(): Record<string, string> {
+    const gpu = gpuEnvironmentEntries();
     if (this.platform !== 'win32') {
-      return {};
+      return gpu;
     }
     const systemRoot = getSystemRoot();
     return {
       SystemRoot: systemRoot,
       COMSPEC: path.join(systemRoot, 'System32', 'cmd.exe'),
+      ...gpu,
     };
   }
 
   /**
-   * Makes data/config/vk_runtime.py match the bundled include/vk_runtime.py,
-   * which every generated script imports. Checked on every generation so an
-   * edit reaches a development run at once; the copy is written beside the
-   * target and renamed over it, so a script starting meanwhile never reads
-   * half a file.
+   * Makes data/config/vk_runtime.py and the vk_gpus.py it imports match the
+   * bundled copies in include/. Checked on every generation so an edit reaches
+   * a development run at once; each copy is written beside its target and
+   * renamed over it, so a script starting meanwhile never reads half a file.
    */
   private async syncRuntime(): Promise<void> {
-    const target = path.join(PATHS.CONFIG, RUNTIME_FILE);
-    const bundled = path.join(fixAsarPath(app.getAppPath()), 'include', RUNTIME_FILE);
-    if (await fs.pathExists(bundled)) {
-      const source = await fs.readFile(bundled, 'utf-8');
-      const current = await fs.readFile(target, 'utf-8').catch(() => null);
-      if (current === source) return;
-      await fs.ensureDir(PATHS.CONFIG);
-      const staged = `${target}.${process.pid}-${Math.random().toString(36).substring(2, 9)}.tmp`;
-      await fs.writeFile(staged, source, 'utf-8');
-      await fs.move(staged, target, { overwrite: true });
-      logger.info(`Updated ${RUNTIME_FILE} from bundled source`);
-    } else if (!await fs.pathExists(target)) {
-      throw new Error(`${RUNTIME_FILE} is missing from ${PATHS.CONFIG}. Reinstall Vapourkit to restore it.`);
+    for (const helper of ['vk_model_runtime.py', 'vk_rtx_runtime.py']) {
+      const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
+      if (await fs.pathExists(helperSource)) {
+        await fs.ensureDir(PATHS.CONFIG);
+        const content = await fs.readFile(helperSource);
+        const target = path.join(PATHS.CONFIG, helper);
+        const current = await fs.readFile(target).catch(() => null);
+        if (!current?.equals(content)) {
+          const staged = `${target}.${process.pid}-${Math.random().toString(36).slice(2)}.tmp`;
+          try {
+            await fs.writeFile(staged, content);
+            await fs.rename(staged, target);
+          } finally { await fs.remove(staged); }
+        }
+      }
+    }
+    for (const file of RUNTIME_FILES) {
+      const target = path.join(PATHS.CONFIG, file);
+      const bundled = path.join(fixAsarPath(app.getAppPath()), 'include', file);
+      if (await fs.pathExists(bundled)) {
+        const source = await fs.readFile(bundled, 'utf-8');
+        const current = await fs.readFile(target, 'utf-8').catch(() => null);
+        if (current === source) continue;
+        await fs.ensureDir(PATHS.CONFIG);
+        const staged = `${target}.${process.pid}-${Math.random().toString(36).substring(2, 9)}.tmp`;
+        await fs.writeFile(staged, source, 'utf-8');
+        await fs.move(staged, target, { overwrite: true });
+        logger.info(`Updated ${file} from bundled source`);
+      } else if (!await fs.pathExists(target)) {
+        throw new Error(`${file} is missing from ${PATHS.CONFIG}. Reinstall Vapourkit to restore it.`);
+      }
     }
   }
 
   async generateScript(config: ScriptConfig): Promise<string> {
+    const startedAt = Date.now();
     await this.syncRuntime();
     const templatePath = this.getTemplatePath();
     let template = await fs.readFile(templatePath, 'utf-8');
+    const performance = pipelineSettingsSchema.parse(config.performance ?? {});
 
     // This main-process boundary protects against imported settings, workflows,
     // and queue items containing a backend unsupported by the current OS.
@@ -359,6 +392,14 @@ export class VapourSynthScriptGenerator {
     const sideChains = layout.side.filter(sideChainRuns);
     const enabledMain = layout.main.steps.filter(f => f.enabled);
     const enabledFilters = [...sideChains.flatMap(chain => chain.steps.filter(f => f.enabled)), ...enabledMain];
+    const shaderFiles = new Map<string, Awaited<ReturnType<typeof prepareVsShader>>>();
+    for (const filter of enabledFilters.filter(f => f.filterType === 'shader')) {
+      if (!filter.shader) throw new Error('Choose a GLSL shader for this step.');
+      shaderFiles.set(filter.id, await prepareVsShader(filter.shader));
+    }
+    if (enabledFilters.some(filter => resolveFilterBackend(filter.backend, defaultBackend) === 'tensorrt-rtx')) {
+      await ensureEngineBuilderScript();
+    }
     // Where the main chain's segment starts, in its source's frames: what a
     // picture from another timeline is lined up against. Side chains are
     // never trimmed, so for them it is always 0.
@@ -441,7 +482,14 @@ export class VapourSynthScriptGenerator {
     const emitStep = (filter: Filter, first: number): string | null => {
       let stageLabel: string | null = null;
 
-      if (filter.filterType === 'aiModel' && filter.modelPath) {
+      if (filter.filterType === 'shader' && filter.shader) {
+        const prepared = shaderFiles.get(filter.id)!;
+        const shaderPath = prepared.file;
+        filterCode += `if not hasattr(core, 'placebo'):\n    try:\n        core.std.LoadPlugin(${pyString(path.join(PATHS.PLUGINS, this.platform === 'win32' ? 'libvs_placebo.dll' : 'libvs_placebo.so').replace(/\\/g, '/'))})\n    except Exception as _shader_error:\n        raise vs.Error('Install shader support from Add filter → GLSL Shader. ' + str(_shader_error))\n`;
+        filterCode += `if clip.format.color_family == vs.RGB:\n    clip = core.resize.Point(clip, format=vs.YUV444P16, matrix_s=\"709\")\nelse:\n    clip = core.resize.Point(clip, format=clip.format.replace(sample_type=vs.INTEGER, bits_per_sample=16).id)\n`;
+        filterCode += `clip = core.placebo.Shader(clip, shader=${pyString(shaderPath.replace(/\\/g, '/'))}, width=clip.width * ${filter.shader.scale}, height=clip.height * ${filter.shader.scale}, matrix=2, trc=1, linearize=${prepared.linearize ? 'True' : 'False'}, sigmoidize=${prepared.sigmoidize ? 'True' : 'False'})\n`;
+        stageLabel = filter.shader.name ?? filter.preset ?? 'GLSL Shader';
+      } else if (filter.filterType === 'aiModel' && filter.modelPath) {
         // Generate AI model upscaling code with this filter's effective backend
         // Check precision and model type for THIS specific model from config, not filter state
         const filterBackend = normalizeBackendForPlatform(
@@ -452,7 +500,7 @@ export class VapourSynthScriptGenerator {
         const filterUseFp32 = configManager.isModelFp32(filter.modelPath);
         const filterModelType = configManager.getModelType(filter.modelPath);
         const filterTemporalFrames = configManager.getTemporalFrames(filter.modelPath);
-        filterCode += this.generateAIModelCode(filter, provider, filterUseFp32, filterModelType, defaultMatrix, defaultPrimaries, defaultTransfer, filter.numStreams ?? config.numStreams, filterTemporalFrames);
+        filterCode += this.generateAIModelCode(filter, provider, filterUseFp32, filterModelType, defaultMatrix, defaultPrimaries, defaultTransfer, filter.numStreams ?? config.numStreams, filterTemporalFrames, performance.trtCudaGraphs);
         stageLabel = this.basename(filter.modelPath).replace(/\.(onnx|engine)$/i, '');
       } else if (filter.filterType === 'custom' && filter.code.trim()) {
         // Insert custom filter code
@@ -544,9 +592,18 @@ export class VapourSynthScriptGenerator {
       template = template.replace(/clip\.set_output\(\)\s*$/, '');
     }
 
+    // Metadata/preview/encode setup remains lazy. Explicit validation executes one
+    // frame through the whole graph, without seeking to the end of the source.
+    // Apply overrides to the generated copy only; keep the user's template intact.
+    // Frame evaluation has not started yet. Zero preserves the template/runtime default.
+    if (performance.cpuThreads) template += `\ncore.num_threads = ${performance.cpuThreads}\n`;
+    if (performance.cacheMiB) template += `\ncore.max_cache_size = ${performance.cacheMiB}\n`;
+    if (config.validationMode) template += '\n# Validate the first output frame.\nclip.get_frame(0)\n';
+    // Script print() calls are diagnostics. Only vspipe may write media to fd 1.
+    template = 'import sys as _vk_sys\n_vk_sys.stdout = _vk_sys.stderr\n' + template;
     await fs.writeFile(tempScriptPath, template, 'utf-8');
 
-    logger.info(`Generated script: ${tempScriptPath}`);
+    logger.info(`Generated script: ${tempScriptPath} (${Date.now() - startedAt} ms)`);
     return tempScriptPath;
   }
 
@@ -555,7 +612,7 @@ export class VapourSynthScriptGenerator {
    * (RGB conversion, temporal frame shifting, YUV restore) is backend-agnostic;
    * the model invocation itself comes from the filter's inference provider.
    */
-  private generateAIModelCode(filter: Filter, provider: InferenceProvider, useFp32: boolean, modelType: ModelType, defaultMatrix: string, defaultPrimaries: string, defaultTransfer: string, numStreams?: number, temporalFrames?: number): string {
+  private generateAIModelCode(filter: Filter, provider: InferenceProvider, useFp32: boolean, modelType: ModelType, defaultMatrix: string, defaultPrimaries: string, defaultTransfer: string, numStreams?: number, temporalFrames?: number, useCudaGraph = true): string {
     if (!filter.modelPath) return '';
 
     // Constant for the VapourSynth clip variable name
@@ -570,41 +627,25 @@ export class VapourSynthScriptGenerator {
     const rgbFormat = useFp32 ? 'vs.RGBS' : 'vs.RGBH';
     code += '# Convert to RGB format for upscaling\n';
     code += `if ${CLIP}.format.id != ${rgbFormat}:\n`;
-    code += `    ${CLIP} = core.resize.Bilinear(${CLIP}, format=${rgbFormat}, matrix_in_s="${defaultMatrix}", primaries_in_s="${defaultPrimaries}", transfer_in_s="${defaultTransfer}")\n`;
+    code += `    if ${CLIP}.format.color_family == vs.RGB:\n`;
+    code += `        ${CLIP} = core.resize.Point(${CLIP}, format=${rgbFormat})\n`;
+    code += '    else:\n';
+    code += `        ${CLIP} = core.resize.Bilinear(${CLIP}, format=${rgbFormat}, matrix_in_s="${defaultMatrix}", primaries_in_s="${defaultPrimaries}", transfer_in_s="${defaultTransfer}")\n`;
     code += `${CLIP} = core.std.Expr(${CLIP}, expr=['x 0 max 1 min'])\n`;
 
     // Determine num_streams value (default to 2 if not specified)
-    const callOptions = { numStreams: numStreams ?? 2, useFp32 };
+    const callOptions = { numStreams: numStreams ?? 2, useFp32, useCudaGraph };
 
     // Generate model inference code based on model type
     if (modelType === 'vsr') {
       // Use temporalFrames parameter or default to 5 for backward compatibility
       const frames = temporalFrames ?? 5;
-      const halfFrames = Math.floor(frames / 2);
-
+      if (!Number.isInteger(frames) || frames < 1 || frames % 2 === 0) throw new Error('Centered temporal models require a positive odd frame count; this model needs a dedicated frame-order adapter.');
       code += `# Temporal upscaling (${frames}-frame VSR architecture)\n`;
-
-      // Generate frame shift variables dynamically based on frame count
-      const frameVars: string[] = [];
-      for (let i = -halfFrames; i <= halfFrames; i++) {
-        if (i === 0) {
-          frameVars.push(CLIP);
-        } else {
-          const varName = i < 0 ? `m${Math.abs(i)}` : `p${i}`;
-          const shift = Math.abs(i);
-          if (i < 0) {
-            code += `${varName} = ${CLIP}[:${shift}] + ${CLIP}[:-${shift}]   # shift ${i}\n`;
-          } else {
-            code += `${varName} = ${CLIP}[${shift}:] + ${CLIP}[-${shift}:]   # shift +${i}\n`;
-          }
-          frameVars.push(varName);
-        }
-      }
-
-      // The model copies frame props from its first clip, which holds the
-      // earliest neighbour; each frame takes its own back, durations included.
+      code += 'import vk_model_runtime as _vk_models\n';
+      code += `_vk_window = _vk_models.temporal_window(${CLIP}, ${frames})\n`;
       code += `_vk_centre = ${CLIP}\n`;
-      code += provider.modelCallCode(`[${frameVars.join(', ')}]`, modelFile, callOptions);
+      code += provider.modelCallCode('_vk_window', modelFile, callOptions);
       code += `${CLIP} = core.std.CopyFrameProps(${CLIP}, _vk_centre)\n`;
       code += '\n';
     } else {

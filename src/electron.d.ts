@@ -21,12 +21,58 @@ export interface RocmStatus {
   summary: string;
 }
 
+/** One physical GPU and its number in each backend's API (electron/gpuSelection.ts). */
+export interface GpuInfo {
+  name: string;
+  vendorId: number;
+  deviceId: number;
+  type: string | null;
+  luid: string | null;
+  pci: string | null;
+  vramMB: number | null;
+  dxgi: number | null;
+  vulkan: number | null;
+  cuda: number | null;
+  cudaUuid: string | null;
+  hip: number | null;
+}
+
+export interface GpuListResult {
+  gpus: GpuInfo[];
+  /** Index into gpus of the chosen GPU; null for the default or when it is missing. */
+  selected: number | null;
+  /** The stored choice, which names a missing GPU when selected is null. */
+  choice: { name: string } | null;
+  error: string | null;
+}
+
 export interface RocmSettingResult {
   setting: RocmSetting;
   status: RocmStatus;
 }
 
 export interface ElectronAPI {
+  listFilterRepository: (refresh: boolean) => Promise<import('../electron/filterRepositoryTypes').RepositoryEntry[]>;
+  installRepositoryFilter: (id: string) => Promise<{ message: string }>;
+  checkEncodingSupport: (request: { encoder: import('../electron/encodingSupportTypes').NvencEncoder; pixelFormat: string }) => Promise<import('../electron/encodingSupportTypes').EncodingSupport>;
+  getPipelineSettings: () => Promise<import('../electron/pipelineSettings').PipelineSettings>;
+  chooseShader: (presetId?: string) => Promise<import('../electron/shaderTypes').ShaderSettings | null>;
+  listShaderLibrary: () => Promise<import('../electron/shaderTypes').ShaderLibraryEntry[]>;
+  readShaderLibrary: (id: string) => Promise<import('../electron/shaderTypes').ShaderLibraryEntry>;
+  saveShaderLibrary: (entry: import('../electron/shaderTypes').ShaderLibraryEntry) => Promise<import('../electron/shaderTypes').ShaderLibraryEntry>;
+  importShaderLibrary: () => Promise<import('../electron/shaderTypes').ShaderLibraryEntry | null>;
+  getShaderRuntimeStatus: () => Promise<{ installed: boolean; busy: boolean }>;
+  installShaderRuntime: () => Promise<{ installed: boolean; busy: boolean }>;
+  getShaderInfo: (settings: import('../electron/shaderTypes').ShaderSettings) => Promise<import('../electron/shaderTypes').ShaderInfo>;
+  getRtxRuntimeStatus: () => Promise<import('../electron/rtxTypes').RtxRuntimeStatus>;
+  installRtxRuntime: () => Promise<import('../electron/rtxTypes').RtxRuntimeStatus>;
+  getNvencRuntimeStatus: () => Promise<import('../electron/nvencTypes').NvencRuntimeStatus>;
+  installNvencRuntime: () => Promise<import('../electron/nvencTypes').NvencRuntimeStatus>;
+  clearNvencEngineCache: () => Promise<void>;
+  setPipelineSettings: (settings: import('../electron/pipelineSettings').PipelineSettings) => Promise<void>;
+  setPreviewEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+  listCatalogModels: () => Promise<import('../electron/componentCatalog').ComponentSnapshot>;
+  installCatalogModel: (request: { id: string; version: string; experimental: boolean; accepted: boolean }) => Promise<{ message: string }>;
   // Dependency management
   platform: NodeJS.Platform;
   checkDependencies: () => Promise<boolean>;
@@ -165,7 +211,8 @@ export interface ElectronAPI {
   getVersion: () => Promise<{ version: string }>;
   
   // Log file reading (efficient polling-based console)
-  readLogTail: (maxLines?: number) => Promise<{ lines: string[]; hasNewContent: boolean; error?: string }>;
+  getConsoleLogCursor: () => Promise<number>;
+  readLogTail: (maxLines?: number, afterOffset?: number) => Promise<{ lines: string[]; hasNewContent: boolean; endOffset?: number; error?: string }>;
   resetLogCache: () => Promise<{ success: boolean }>;
   
   // Folder access
@@ -173,10 +220,6 @@ export interface ElectronAPI {
   openConfigFolder: () => Promise<{ success: boolean }>;
   openVSPluginsFolder: () => Promise<{ success: boolean }>;
   openVSScriptsFolder: () => Promise<{ success: boolean }>;
-
-  // DLSS 5 Neural Uplift runtime (nvngx_dlssnr.dll)
-  dlssRuntimeStatus: () => Promise<DlssRuntimeStatus>;
-  dlssRuntimeImport: () => Promise<DlssImportResult>;
 
   // Post-update notice
   getUpdateReport: () => Promise<UpdateReportSnapshot>;
@@ -222,6 +265,8 @@ export interface ElectronAPI {
   /** Which ROCm the MIGraphX backend runs against (Linux only), with what it resolves to */
   getRocmSetting: () => Promise<RocmSettingResult>;
   setRocmSetting: (setting: RocmSetting) => Promise<RocmSettingResult>;
+  getGpus: () => Promise<GpuListResult>;
+  setGpu: (index: number | null) => Promise<{ success: boolean }>;
   getDescriptiveNamingEnabled: () => Promise<{ enabled: boolean }>;
   setDescriptiveNamingEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
 
@@ -254,7 +299,7 @@ export interface ElectronAPI {
   saveFilterTemplate: (template: FilterTemplate) => Promise<{ success: boolean; error?: string }>;
   deleteFilterTemplate: (name: string) => Promise<{ success: boolean; error?: string }>;
   readTemplateFile: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
-  importTemplateFile: (filePath: string) => Promise<{ success: boolean; template?: FilterTemplate; error?: string }>;
+  importTemplateFile: (filePath: string) => Promise<{ success: boolean; template?: FilterTemplate; error?: string; warnings?: string[] }>;
   
   // Model category operations
   getModelCategories: () => Promise<string[]>;
@@ -340,20 +385,6 @@ export type TemplateDecisionChoice = 'replace' | 'keep' | 'remove';
 export interface UpdateReportSnapshot {
   report: UpdateReport | null;
   decisions: TemplateDecision[];
-}
-
-export interface DlssRuntimeStatus {
-  installed: boolean;
-  installedVersion: string | null;
-  /** Where the runtime goes, so a user who would rather copy it themselves can. */
-  targetDirectory: string;
-}
-
-export interface DlssImportResult {
-  success: boolean;
-  canceled?: boolean;
-  error?: string;
-  version?: string | null;
 }
 
 export interface DevConsoleLog {
@@ -488,6 +519,7 @@ export interface PreviewFrameResult {
 }
 
 export interface VideoInfo {
+  tracks?: import('../electron/mediaTracks').ContainerTrack[];
   path: string;
   name: string;
   size: number;
@@ -564,6 +596,8 @@ export interface InitializeModelResult {
 }
 
 export interface ValidateOnnxModelResult {
+  contract?: import('../electron/modelContract').ModelContract;
+  compatibilityError?: string;
   isValid: boolean;
   error?: string;
   inputShape?: number[];
@@ -655,7 +689,7 @@ export interface Filter {
   id: string;
   enabled: boolean;
   /** 'videoSource' is a Load Video step, which heads a side chain (electron/chainGraph.ts). */
-  filterType: 'aiModel' | 'custom' | 'videoSource';
+  filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
   preset: string;
   code: string;
   order: number;
@@ -665,6 +699,7 @@ export interface Filter {
   align?: SideChainAlignment;
   /** The Load Video step whose side chain this step is in; absent for the main chain. */
   chain?: string;
+  shader?: import('../electron/shaderTypes').ShaderSettings;
   modelPath?: string;
   modelType?: 'vsr' | 'image';
   category?: string | string[];
@@ -864,13 +899,14 @@ export interface WorkflowData {
     description?: string;
     enabled: boolean;
     order: number;
-    filterType: 'aiModel' | 'custom' | 'videoSource';
+    filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
     /** A Load Video step's file. Absolute, so a workflow moved to another machine names it as it was. */
     sourcePath?: string;
     align?: SideChainAlignment;
     /** The exported id of the Load Video step heading this step's side chain. */
     chain?: string;
-    modelPath?: string;
+    shader?: import('../electron/shaderTypes').ShaderSettings;
+  modelPath?: string;
     modelType?: 'vsr' | 'image';
     category?: string | string[];
     backend?: FilterBackend;

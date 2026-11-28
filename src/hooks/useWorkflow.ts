@@ -1,3 +1,5 @@
+import { freshSessionOnStartup } from '../utils/startupSession';
+import { variablesWithParameters } from '../../electron/filterValidation';
 // src/hooks/useWorkflow.ts
 import { useState, useCallback, useEffect } from 'react';
 import type { Filter, FilterTemplate, WorkflowData } from '../electron.d';
@@ -25,7 +27,7 @@ interface ImportWorkflowModalState {
     name: string;
     code: string;
     description?: string;
-    filterType: 'aiModel' | 'custom' | 'videoSource';
+    filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
     category?: string | string[];
     parameters?: Filter['parameters'];
     variables?: Filter['variables'];
@@ -74,6 +76,7 @@ export function useWorkflow({
   // and the settings from before the workflow were lost for good.
   const [workflowState, setWorkflowState] = useState<LoadedWorkflowRecord>(() => {
     try {
+      if (freshSessionOnStartup()) return NO_WORKFLOW;
       const saved = localStorage.getItem(LOADED_WORKFLOW_KEY);
       if (saved) return JSON.parse(saved) as LoadedWorkflowRecord;
     } catch {
@@ -165,6 +168,7 @@ export function useWorkflow({
           sourcePath: wf.sourcePath,
           align: wf.align,
           chain: wf.chain,
+          shader: wf.shader,
           modelPath: resolvedModelPath,
           modelType: wf.modelType,
           category: wf.category,
@@ -263,13 +267,14 @@ export function useWorkflow({
             sourcePath: filter.sourcePath,
             align: filter.align,
             chain: filter.chain,
+            shader: filter.shader,
             modelPath: portableModelName,
             modelType: filter.filterType === 'aiModel' ? (filter.modelType || 'image') : undefined,
             category,
             backend: filter.backend,
             numStreams: filter.numStreams,
             parameters: filter.parameters,
-            variables: filter.variables,
+            variables: variablesWithParameters(filter.variables, filter.parameters),
             editor: filter.editor,
           };
         }),
@@ -367,7 +372,7 @@ export function useWorkflow({
           code: filter.code,
           description: filter.description,
           category: filter.category,
-          variables: filter.variables,
+          variables: variablesWithParameters(filter.variables, filter.parameters),
           editor: filter.editor,
         });
       }

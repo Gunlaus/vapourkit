@@ -1,3 +1,4 @@
+import { filterFailureHint } from './filterDiagnostics';
 import { API3_UNSUPPORTED, describeCoreTooNew } from './vapoursynthCore';
 
 // VapourSynth emits one of these non-fatal notices for every legacy API3
@@ -37,6 +38,15 @@ export function formatVapourSynthValidationError(output: string): string {
 
   if (API3_UNSUPPORTED.test(output)) {
     return filtered ? `${describeCoreTooNew()}\n\n${filtered}` : describeCoreTooNew();
+  }
+  const hint = filterFailureHint(filtered);
+  if (hint) return `${hint}\n\n${filtered}`;
+  // An unused incompatible plugin can log a Critical autoload notice while
+  // the script continues. Put the actual evaluation failure first, keeping
+  // startup/build diagnostics intact below it.
+  const scriptFailure = filtered.lastIndexOf('Script evaluation failed:');
+  if (scriptFailure > 0) {
+    return `${filtered.slice(scriptFailure).trim()}\n\nStartup/build output:\n${filtered.slice(0, scriptFailure).trim()}`;
   }
   return filtered || 'VapourSynth failed before producing output. Check the log for details.';
 }

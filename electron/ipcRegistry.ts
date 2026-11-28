@@ -1,3 +1,6 @@
+import { registerShaderHandlers } from './shaderHandlers';
+import { registerFilterRepositoryHandlers } from './filterRepositoryHandlers';
+import { registerModelCatalogHandlers } from './modelCatalogHandlers';
 import { registerAlignHandlers } from './alignHandlers';
 import { BrowserWindow } from 'electron';
 import { registerDialogHandlers } from './dialogHandlers';
@@ -10,7 +13,6 @@ import { registerDependencyHandlers } from './dependencyHandlers';
 import { registerUpdateHandlers } from './updateHandlers';
 import { registerQueueHandlers } from './queueHandlers';
 import { registerDiscordRichPresenceHandlers } from './discordRichPresenceHandlers';
-import { registerDlssRuntimeHandlers } from './dlssRuntimeHandlers';
 import { registerLutHandlers } from './lutHandlers';
 import { registerUpdateReportHandlers } from './updateReportHandlers';
 import { DependencyManager } from './dependencyManager';
@@ -31,6 +33,9 @@ export function registerAllIpcHandlers(
 ) {
   // Register all handler groups
   registerDialogHandlers();
+  registerShaderHandlers();
+  registerFilterRepositoryHandlers();
+  registerModelCatalogHandlers();
   registerModelHandlers(mainWindow);
   registerVideoHandlers(mainWindow, scriptGenerator, dependencyManager);
   registerConfigHandlers(mainWindow);
@@ -41,7 +46,6 @@ export function registerAllIpcHandlers(
   registerUpdateHandlers();
   registerQueueHandlers();
   registerDiscordRichPresenceHandlers();
-  registerDlssRuntimeHandlers();
   registerUpdateReportHandlers(dependencyManager);
   registerAlignHandlers();
 }

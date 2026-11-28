@@ -25,7 +25,7 @@
 
 import { parseReferenceVideo, type ReferenceVideo } from './referenceVideo';
 
-export type StepKind = 'aiModel' | 'custom' | 'videoSource';
+export type StepKind = 'aiModel' | 'custom' | 'shader' | 'videoSource';
 
 /**
  * How a Load Video's file lines up with the main source, as include/
@@ -80,6 +80,7 @@ export interface GraphStep {
   order: number;
   preset?: string;
   code: string;
+  shader?: { path: string };
   modelPath?: string;
   /** A Load Video step's file. */
   sourcePath?: string;
@@ -121,6 +122,7 @@ export function chainOf(step: GraphStep): string {
  */
 export function producesPicture(step: GraphStep): boolean {
   if (step.filterType === 'videoSource') return Boolean(step.sourcePath);
+  if (step.filterType === 'shader') return Boolean(step.shader?.path);
   if (step.filterType === 'aiModel') return Boolean(step.modelPath);
   return step.code.trim().length > 0;
 }

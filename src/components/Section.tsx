@@ -10,6 +10,7 @@ import { ChevronDown } from 'lucide-react';
 
 interface SectionProps {
   title: string;
+  headerOverlayActive?: boolean;
   /** Right-aligned summary text — a count, a state, whatever reads at a glance. */
   meta?: React.ReactNode;
   /** Controls that belong to the section, rendered in its header. */
@@ -22,7 +23,7 @@ interface SectionProps {
 }
 
 export const Section = memo<SectionProps>(({
-  title, meta, actions, collapsible = false, open = true, onToggle, children,
+  title, meta, actions, headerOverlayActive = false, collapsible = false, open = true, onToggle, children,
 }: SectionProps) => {
   const headerInner = (
     <>
@@ -38,7 +39,7 @@ export const Section = memo<SectionProps>(({
   // brighter header band. Rows inside get only an ink-900 hairline.
   return (
     <section className="flex-shrink-0 mt-2 border-t border-ink-700 first:mt-0 first:border-t-0">
-      <div className="sticky top-0 z-10 h-9 flex items-stretch gap-2.5 pr-3 bg-ink-850 border-b border-ink-800 shadow-[0_2px_4px_-2px_rgba(0,0,0,0.5)]">
+      <div className={`sticky top-0 ${headerOverlayActive ? 'z-30' : 'z-10'} h-9 flex items-stretch gap-2.5 pr-3 bg-ink-850 border-b border-ink-800 shadow-[0_2px_4px_-2px_rgba(0,0,0,0.5)]`}>
         <span className="w-[3px] bg-accent-500 flex-shrink-0" aria-hidden="true" />
         {collapsible ? (
           <button

@@ -1,3 +1,4 @@
+import { validateFilterTemplate } from './filterValidation';
 // electron/templateManager.ts
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -156,6 +157,7 @@ export class TemplateManager {
    */
   async saveTemplate(template: FilterTemplate): Promise<void> {
     try {
+      validateFilterTemplate(template);
       await this.ensureTemplatesDir();
       
       // Add metadata if not present
@@ -175,6 +177,12 @@ export class TemplateManager {
       logger.error(`Error saving template ${template.name}:`, error);
       throw error;
     }
+  }
+
+  /** Roll back a newly created template without recording a user deletion. */
+  async rollbackCreatedTemplate(name: string): Promise<void> {
+    const filePath = await this.resolveTemplatePath(name);
+    if (await fs.pathExists(filePath)) await fs.remove(filePath);
   }
 
   /**

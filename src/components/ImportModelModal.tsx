@@ -60,6 +60,7 @@ export const ImportModelModal = memo<ImportModelModalProps>(({
   return (
     <ModalShell
       title={title}
+      panelProps={{ role: 'dialog', 'aria-label': title, 'aria-modal': true }}
       icon={FileUp}
       onClose={onClose}
       closeDisabled={isImporting}

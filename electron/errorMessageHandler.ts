@@ -1,3 +1,4 @@
+import { filterFailureHint } from './filterDiagnostics';
 // electron/errorMessageHandler.ts
 import { logger } from './logger';
 import { API3_UNSUPPORTED, describeCoreTooNew } from './vapoursynthCore';
@@ -62,6 +63,9 @@ export class ErrorMessageHandler {
     if (nvenc) {
       return describeNvencDriverError(nvenc);
     }
+
+    const filterHint = filterFailureHint(stderr);
+    if (filterHint) return filterHint;
 
     // The API3 autoload notices are never the error, and with nothing else
     // printed they were all the "last lines" fallback below had to show.

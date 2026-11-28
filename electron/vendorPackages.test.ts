@@ -373,3 +373,8 @@ describe('computeVendorPurge', () => {
     expect(new Set(purge).size).toBe(purge.length);
   });
 });
+
+it('reconciles the pinned CPU reference runtime for NVIDIA installations', () => {
+  expect(getPypiPackages('nvidia')).toContain('onnxruntime==1.23.2');
+  expect(getPypiPackages('amd')).not.toContain('onnxruntime==1.23.2');
+});

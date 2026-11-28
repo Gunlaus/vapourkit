@@ -1,3 +1,8 @@
+import { readConsoleTail } from './consoleTail';
+import { installRtxRuntime, rtxRuntimeStatus } from './rtxRuntime';
+import { pipelineSettingsSchema } from './pipelineSettings';
+import { installNvencRuntime, nvencRuntimeStatus, clearNvencEngineCache } from './nvencRuntime';
+import { handleValidated } from './ipcValidation';
 import { ipcMain, BrowserWindow, app } from 'electron';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -6,6 +11,8 @@ import { configManager } from './configManager';
 import { VS_MLRT_VERSION, PATHS } from './constants';
 import { VsMlrtManager } from './vsMlrtManager';
 import { describeRocm, type RocmMode, type RocmSetting } from './rocmEnvironment';
+import { choiceFor, findChosenGpu, probeGpus, type GpuInfo } from './gpuSelection';
+import { fixAsarPath, setupVSEnvironment } from './utils';
 
 // Cache for log file reading - stores last file size for change detection
 let lastLogSize = 0;
@@ -14,6 +21,13 @@ let lastLogSize = 0;
  * Registers all configuration-related IPC handlers
  */
 export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
+  ipcMain.handle('rtx-runtime-status', () => rtxRuntimeStatus());
+  ipcMain.handle('rtx-runtime-install', () => installRtxRuntime());
+  ipcMain.handle('nvencc-runtime-status', () => nvencRuntimeStatus());
+  ipcMain.handle('nvencc-runtime-install', () => installNvencRuntime());
+  ipcMain.handle('nvencc-clear-engine-cache', () => clearNvencEngineCache());
+  ipcMain.handle('get-pipeline-settings', () => configManager.getPipelineSettings());
+  handleValidated('set-pipeline-settings', pipelineSettingsSchema, settings => configManager.setPipelineSettings(settings));
   ipcMain.handle('get-colorimetry-settings', async () => {
     const settings = configManager.getColorimetrySettings();
     return settings;
@@ -145,6 +159,39 @@ export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
     return { setting: clean, status: describeRocm(clean) };
   });
 
+  // Which GPU inference runs on (gpuSelection.ts). Listing also refreshes the
+  // stored choice, whose LUID is new at every boot and whose CUDA and HIP
+  // numbers follow hardware changes.
+  let listedGpus: GpuInfo[] = [];
+
+  ipcMain.handle('get-gpus', async () => {
+    const choice = configManager.getGpuChoice();
+    if (!await fs.pathExists(PATHS.PYTHON)) {
+      return { gpus: [], selected: null, choice: choice ?? null, error: 'GPUs are listed once the Python environment is installed.' };
+    }
+    try {
+      const script = path.join(fixAsarPath(app.getAppPath()), 'include', 'vk_gpus.py');
+      listedGpus = await probeGpus(PATHS.PYTHON, script, setupVSEnvironment(PATHS.PYTHON));
+    } catch (error) {
+      logger.warn(`Could not list GPUs: ${error instanceof Error ? error.message : String(error)}`);
+      return { gpus: [], selected: null, choice: choice ?? null, error: 'The GPUs could not be listed. See the log for details.' };
+    }
+    const chosen = choice ? findChosenGpu(listedGpus, choice) : undefined;
+    if (chosen) {
+      const fresh = choiceFor(listedGpus, chosen);
+      if (JSON.stringify(fresh) !== JSON.stringify(choice)) await configManager.setGpuChoice(fresh);
+    }
+    return { gpus: listedGpus, selected: chosen ? listedGpus.indexOf(chosen) : null, choice: choice ?? null, error: null };
+  });
+
+  ipcMain.handle('set-gpu', async (event, index: number | null) => {
+    const gpu = typeof index === 'number' ? listedGpus[index] : undefined;
+    const choice = gpu ? choiceFor(listedGpus, gpu) : undefined;
+    logger.info(`Setting inference GPU: ${choice ? `${choice.name}${choice.pci ? ` (${choice.pci})` : ''}` : 'default'}`);
+    await configManager.setGpuChoice(choice);
+    return { success: true };
+  });
+
   ipcMain.handle('get-encoding-settings-expanded', async () => {
     const expanded = configManager.getEncodingSettingsExpanded();
     return { expanded };
@@ -160,7 +207,10 @@ export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
   });
 
   // Read the last N lines from the log file (efficient tail reading)
-  ipcMain.handle('read-log-tail', async (event, maxLines: number = 300) => {
+  ipcMain.handle('console-log-cursor', async () => {
+    try { return (await fs.stat(logger.getLogPath())).size; } catch { return 0; }
+  });
+  ipcMain.handle('read-log-tail', async (event, maxLines: number = 300, afterOffset: number = 0) => {
     try {
       const logPath = logger.getLogPath();
       
@@ -171,6 +221,8 @@ export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
       
       const stats = await fs.stat(logPath);
       const currentSize = stats.size;
+      afterOffset = Number.isSafeInteger(afterOffset) && afterOffset >= 0 && afterOffset <= currentSize ? afterOffset : 0;
+      maxLines = Number.isInteger(maxLines) ? Math.max(1, Math.min(1000, maxLines)) : 300;
       
       // Check if file has changed since last read
       const hasNewContent = currentSize !== lastLogSize;
@@ -182,32 +234,7 @@ export function registerConfigHandlers(mainWindow: BrowserWindow | null) {
       
       lastLogSize = currentSize;
       
-      // Read the file efficiently - only read last portion if file is large
-      const MAX_BYTES_TO_READ = 512 * 1024; // 512KB max
-      let content: string;
-      
-      if (currentSize > MAX_BYTES_TO_READ) {
-        // Read only the last portion of the file
-        const fd = await fs.open(logPath, 'r');
-        const buffer = Buffer.alloc(MAX_BYTES_TO_READ);
-        const startPosition = currentSize - MAX_BYTES_TO_READ;
-        await fs.read(fd, buffer, 0, MAX_BYTES_TO_READ, startPosition);
-        await fs.close(fd);
-        content = buffer.toString('utf-8');
-        // Remove potentially incomplete first line
-        const firstNewline = content.indexOf('\n');
-        if (firstNewline > 0) {
-          content = content.substring(firstNewline + 1);
-        }
-      } else {
-        content = await fs.readFile(logPath, 'utf-8');
-      }
-      
-      // Split into lines and take last N
-      const allLines = content.split('\n').filter(line => line.trim().length > 0);
-      const lines = allLines.slice(-maxLines);
-      
-      return { lines, hasNewContent: true };
+      return { ...await readConsoleTail(logPath, afterOffset, maxLines, currentSize), hasNewContent: true };
     } catch (error) {
       // Don't log errors here to avoid infinite loops
       return { lines: [], hasNewContent: false, error: String(error) };

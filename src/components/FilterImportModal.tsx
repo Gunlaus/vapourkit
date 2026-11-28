@@ -24,7 +24,7 @@ interface FilterImportModalProps {
     name: string;
     code: string;
     description?: string;
-    filterType: 'aiModel' | 'custom' | 'videoSource';
+    filterType: 'aiModel' | 'custom' | 'shader' | 'videoSource';
     category?: string | string[];
     parameters?: FilterParameterValues;
     variables?: FilterVariables;

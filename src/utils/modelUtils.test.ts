@@ -3,6 +3,7 @@ import {
   filterModels,
   getModelDisplayName,
   modelNeedsBuild,
+  hasUnbuiltEngineModel,
   shouldShowBuildNotification,
   getEnabledAIModelPaths,
   getPortableModelName,
@@ -174,5 +175,20 @@ describe('resolvePortableModelName', () => {
   it('falls back to ONNX when no engine exists', () => {
     const result = resolvePortableModelName('Other', models);
     expect(result).toBe('/models/Other.onnx');
+  });
+});
+
+describe('hasUnbuiltEngineModel', () => {
+  const ai = (modelPath: string, backend?: 'tensorrt' | 'directml' | 'auto') => ({ enabled: true, filterType: 'aiModel', modelPath, backend });
+
+  it('blocks processing while a TensorRT filter still points at an ONNX', () => {
+    expect(hasUnbuiltEngineModel([ai('C:/models/m_fp16.onnx')], 'tensorrt')).toBe(true);
+    expect(hasUnbuiltEngineModel([ai('C:/models/packages/cat-1-abc/cat-1.ONNX', 'auto')], 'tensorrt')).toBe(true);
+  });
+
+  it('allows built engines, ONNX-direct backends and disabled filters', () => {
+    expect(hasUnbuiltEngineModel([ai('C:/models/m_fp16.engine')], 'tensorrt')).toBe(false);
+    expect(hasUnbuiltEngineModel([ai('C:/models/m_fp16.onnx', 'directml')], 'tensorrt')).toBe(false);
+    expect(hasUnbuiltEngineModel([{ ...ai('C:/models/m_fp16.onnx'), enabled: false }], 'tensorrt')).toBe(false);
   });
 });

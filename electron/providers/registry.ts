@@ -7,12 +7,14 @@ import type { BackendId } from './descriptors';
 import { BACKENDS, normalizeBackendForPlatform, resolveBackendId } from './descriptors';
 import type { InferenceProvider } from './types';
 import { tensorrtProvider } from './tensorrt';
+import { rtxProvider } from './tensorrtRtx';
 import { directmlProvider } from './directml';
 import { ncnnProvider } from './ncnn';
 import { migraphxProvider } from './migraphx';
 
 const providers: Record<BackendId, InferenceProvider> = {
   tensorrt: tensorrtProvider,
+  'tensorrt-rtx': rtxProvider,
   directml: directmlProvider,
   ncnn: ncnnProvider,
   migraphx: migraphxProvider,
