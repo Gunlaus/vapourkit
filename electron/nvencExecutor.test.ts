@@ -72,6 +72,7 @@ describe('NVEncC native lifecycle', () => {
     expect(control.spawn.mock.calls.some(c => c[0].includes('vspipe'))).toBe(false);
     expect(send.mock.calls.some(c => c[0] === 'upscale-progress' && c[1].type === 'complete')).toBe(true);
     expect(log.mock.calls.some(c => c[0].includes('"gpuTensorSharingConfirmed":true'))).toBe(true);
+    expect(log.mock.calls.some(c => /^Result: 240 frames · .* seconds total/.test(c[0]))).toBe(true);
     expect(control.release).toHaveBeenCalledTimes(1);
   });
   it.each(['probe', 'prepare', 'encode'])('cancels during %s and never publishes a partial output', async phase => {
@@ -114,7 +115,9 @@ it('renders a shader without starting the Python model builder and verifies the 
     shader: { path: shader, scale: 2, parameters: {} } }];
   const precision = vi.fn(), modelType = vi.fn();
   const exec = new NvencExecutor(null, '/python', 'win32');
+  const log = vi.fn(); exec.onDiagnostic = log;
   await exec.execute(r, precision, modelType);
+  expect(log.mock.calls.some(c => c[0].startsWith('Result: 240 frames'))).toBe(true);
   expect(await fs.pathExists(output)).toBe(true);
   expect(precision).not.toHaveBeenCalled(); expect(modelType).not.toHaveBeenCalled();
   expect(control.spawn.mock.calls.map(call => call[0])).toEqual(['/ffprobe', path.join(root, 'nvencc', '9.41', 'NVEncC64.exe'), '/ffprobe']);

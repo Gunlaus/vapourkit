@@ -1,3 +1,4 @@
+import { pipelineResult } from './pipelineResult';
 import { prepareShader } from './shaders';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs-extra';
@@ -217,6 +218,7 @@ export class NvencExecutor {
       this.log('[pipeline-summary] ' + JSON.stringify({ status: 'completed', backend: 'nvencc', processing: isShader ? 'shader' : 'onnx', filter: label, plannedFrames: planned, plannedFramesEstimated: !Number(video.nb_frames), encodedFrames: frames,
         elapsedMs: elapsed, setupMs, nativeProcessMs, verificationMs, averagePipelineFps: frames * 1000 / elapsed, nativeReportedFps: fps, gpuTensorSharingConfirmed: isShader ? null : zeroCopy, audioTracks: request.encoding.simple.audioCodec === 'none' ? [] : selectedOrdinals(source, 'audio', request.encoding.audioTracks), subtitleTracks: selectedOrdinals(source, 'subtitle', request.encoding.subtitleTracks) }));
       if (!isShader && zeroCopy !== true) this.log('[nvencc] GPU tensor sharing was not confirmed. Include this log when reporting performance; this run is not proof of a fully GPU-resident inference path.');
+      this.log(pipelineResult(frames, elapsed));
       this.send({ type: 'complete', currentFrame: frames, totalFrames: frames, fps: frames * 1000 / elapsed, percentage: 100, message: 'Processing completed successfully!' });
     } catch (error) {
       this.log('[pipeline-summary] ' + JSON.stringify({ status: this.stopped ? 'cancelled' : 'failed', backend: 'nvencc', encodedFrames: frames, elapsedMs: Date.now() - started }));

@@ -1,3 +1,4 @@
+import { pipelineResult } from './pipelineResult';
 import { MatroskaPipe } from './matroskaPipe';
 import { FFmpegProgress } from './ffmpegProgress';
 import { isPreviewEnabled } from './previewSettings';
@@ -607,6 +608,7 @@ export class UpscaleExecutor {
         gpuSamplingScope: 'first NVIDIA GPU, device-wide',
         gpuAverageUtilization: this.gpuSamples ? this.gpuSum / this.gpuSamples : null, gpuPeakMemoryMiB: this.gpuSamples ? this.gpuPeak : null };
       this.diagnostic('[pipeline-summary] ' + JSON.stringify(record));
+      if (status === 'completed') this.diagnostic(pipelineResult(encoded, elapsed));
     };
     const stopped = () => {
       if (completed || failed || !ffmpegClosed) return;

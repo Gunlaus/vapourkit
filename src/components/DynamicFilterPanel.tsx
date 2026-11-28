@@ -695,6 +695,7 @@ export const DynamicFilterPanel = memo<DynamicFilterPanelProps>(({
   return (
     <>
     <Section
+      headerOverlayActive={showAddMenu}
       title={title}
       meta={pendingFilters.length > 0
         ? `${pendingFilters.filter(f => f.enabled).length}/${pendingFilters.length} on`

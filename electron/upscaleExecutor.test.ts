@@ -212,6 +212,7 @@ describe('confirmed processing outcomes', () => {
     await run;
     const report=JSON.parse(logs.find(line=>line.startsWith('[pipeline-summary]'))!.slice('[pipeline-summary] '.length));
     expect(report).toMatchObject({status:'completed',encodedFrames:10,producedFrames:10,producerFps:4,producerTimingIncludesDownstreamBackpressure:true});
+    expect(logs.some(line => /^Result: 10 frames · .* seconds total/.test(line))).toBe(true);
   });
 });
 

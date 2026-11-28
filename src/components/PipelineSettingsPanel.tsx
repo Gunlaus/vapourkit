@@ -47,7 +47,6 @@ export function PipelineSettingsPanel() {
       <RtxRuntimePanel />
       <label className="block">Preview height <select aria-label="Encoding preview height" className="ml-2 bg-ink-900" value={settings.previewHeight} onChange={e => update({ previewHeight: Number(e.target.value) })}>{[180,360,480,720,1080].map(n => <option key={n} value={n}>{n} pixels</option>)}</select></label>
       <label className="block">Preview frames per second <input aria-label="Encoding preview frames per second" type="number" className="ml-2 w-16 bg-ink-900" min="0.1" max="5" step="0.1" value={settings.previewFps} onChange={e => update({ previewFps: Number(e.target.value) })} /></label>
-      <p>Preview controls apply to VapourSynth encoding. Disable preview before rendering to omit its output branch.</p>
       <label className="flex gap-2 items-center"><input type="checkbox" checked={settings.trtCudaGraphs} onChange={e => update({ trtCudaGraphs: e.target.checked })} />VapourSynth AI model CUDA Graphs</label>
       <p>Reduces GPU launch overhead without changing model precision. Falls back if graph setup fails.</p>
       <details>
@@ -56,7 +55,7 @@ export function PipelineSettingsPanel() {
           <label className="block">Frames in flight <input aria-label="Frames in flight" type="number" className="ml-2 w-20 bg-ink-900" min="0" max="32" value={settings.frameRequests} onChange={e => update({ frameRequests: Number(e.target.value) })} /></label>
           <label className="block">CPU worker threads <input aria-label="CPU worker threads" type="number" className="ml-2 w-20 bg-ink-900" min="0" max="128" value={settings.cpuThreads} onChange={e => update({ cpuThreads: Number(e.target.value) })} /></label>
           <label className="block">Frame cache limit (MiB) <input aria-label="Frame cache limit" type="number" className="ml-2 w-20 bg-ink-900" min="0" max="65536" value={settings.cacheMiB} onChange={e => update({ cacheMiB: Number(e.target.value) })} /></label>
-          <p>Zero preserves runtime/template defaults. Shader-only NVIDIA jobs can use automatic GPU routing. The dedicated preview keeps its own cache limit.</p>
+          <p>0 uses the runtime defaults.</p>
         </div>
       </details>
     </fieldset>
