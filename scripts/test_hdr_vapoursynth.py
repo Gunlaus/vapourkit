@@ -22,7 +22,7 @@ def pq_code(nits):
 
 for level in (0., 1.):
     source = core.std.BlankClip(width=64, height=64, length=2, format=vs.RGBS, color=[level] * 3)
-    source = core.std.SetFrameProps(source, _Transfer=1, _Primaries=1, _Matrix=0, _ColorRange=0)
+    source = core.std.SetFrameProps(source, _Transfer=1, _Primaries=1, _Matrix=0, _Range=1)
     output = hdr.convert(source, settings)
     frame = output.get_frame(0)
     assert output.format.id == vs.YUV420P10
@@ -35,7 +35,7 @@ for level in (0., 1.):
     print(f'RGB level {level}: PQ code {value}, expected {expected:.3f}; SDR preview OK')
 
 source = core.std.BlankClip(width=64, height=64, length=2, format=vs.YUV420P8, color=[126, 128, 128])
-source = core.std.SetFrameProps(source, _Transfer=1, _Primaries=1, _Matrix=1, _ColorRange=1, _ChromaLocation=1)
+source = core.std.SetFrameProps(source, _Transfer=1, _Primaries=1, _Matrix=1, _Range=0, _ChromaLocation=1)
 prepared = hdr.prepare_source(source, settings, defaults)
 assert prepared.format.id == vs.YUV444P16
 hdr.convert(prepared, settings).get_frame(0)
@@ -50,6 +50,6 @@ else:
 
 overridden = hdr.prepare_source(source, dict(settings, sourceMatrix='170m', sourcePrimaries='170m', sourceRange='full'), defaults)
 props = overridden.get_frame(0).props
-assert props['_Matrix'] == 6 and props['_Primaries'] == 6 and props['_ColorRange'] == 0
+assert props['_Matrix'] == 6 and props['_Primaries'] == 6 and props['_Range'] == 1
 print('Independent source overrides OK')
 print('VapourSynth R79 HDR smoke test passed')

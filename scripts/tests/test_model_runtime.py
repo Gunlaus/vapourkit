@@ -462,7 +462,8 @@ class SpatialAdapterReferenceTests(unittest.TestCase):
         self.assertEqual(FDAT_SOURCE.read_bytes(), original_bytes)
 
     def test_builder_uses_private_adaptation_and_keeps_original_source_provenance(self):
-        with tempfile.TemporaryDirectory() as folder:
+        # Provenance is relative to the engine; Windows cannot relativize across drives.
+        with tempfile.TemporaryDirectory(dir=FDAT_SOURCE.parent) as folder:
             target = Path(folder) / 'fdat.engine'
             used = []
             def build_candidate(opts, report):
@@ -598,7 +599,7 @@ class RuntimeComparisonTests(unittest.TestCase):
                 self.assertEqual(benchmark.main(['--engine', str(engine), '--compare', '--report', str(report)]), 0)
             self.assertEqual([c[c.index('--mode') + 1] for c in calls], ['inspect', 'original', 'managed', 'managed-graphs'])
             for call in calls:
-                self.assertEqual(call[call.index('--engine') + 1], str(engine))
+                self.assertEqual(Path(call[call.index('--engine') + 1]).resolve(), engine.resolve())
                 self.assertEqual(call[call.index('--width') + 1], '1920')
                 self.assertEqual(call[call.index('--streams') + 1], '2')
             self.assertEqual(len(json.loads(report.read_text())['results']), 3)
