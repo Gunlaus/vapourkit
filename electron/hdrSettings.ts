@@ -4,6 +4,7 @@ import { splitArgs, type EncodingSettings } from './encodingSettings';
 export const hdrSettingsSchema = z.object({
   method: z.enum(['mathematical', 'hdrtvnet']).optional(),
   aiExposure: z.number().finite().min(-2).max(2).optional(),
+  aiShoulder: z.number().finite().min(0.4).max(0.95).optional(),
   enabled: z.boolean().default(false),
   preset: z.enum(['natural', 'animation', 'custom']).default('natural'),
   peakNits: z.number().finite().min(400).max(4000).default(1000),
@@ -28,7 +29,7 @@ const HDR_TAGS = ['-pix_fmt', 'yuv420p10le', '-color_primaries', 'bt2020', '-col
 const SDR_SET_PARAMS = 'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709';
 
 /** Reject unsafe user transforms; never fall back to SDR encoding on failure. */
-export function hdrEncodingArgs(encoding: EncodingSettings, resolved: string): string[] {
+export function hdrEncodingArgs(_encoding: EncodingSettings, resolved: string): string[] {
   const args = splitArgs(resolved);
   const codecIndex = args.findIndex(arg => ['-c:v', '-codec:v', '-vcodec', '-c:v:0'].includes(arg));
   const codec = args[codecIndex + 1];
@@ -47,6 +48,7 @@ export function hdrEncodingArgs(encoding: EncodingSettings, resolved: string): s
   }
   // Main 10 is required for HEVC; AV1's Main profile includes 10-bit 4:2:0.
   if (codec.startsWith('hevc') || codec === 'libx265') cleaned.push('-profile:v', 'main10');
-  else if (encoding.mode === 'simple') cleaned.push('-profile:v', 'main');
+  // AV1 encoders disagree on profile option names. Their default with the
+  // enforced 10-bit 4:2:0 input selects Main; do not inject a symbolic profile.
   return [...cleaned, ...HDR_TAGS];
 }

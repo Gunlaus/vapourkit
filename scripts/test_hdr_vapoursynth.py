@@ -1,4 +1,4 @@
-"""Opt-in target-runtime smoke test; uses synthetic CPU clips, no GPU/models."""
+"""Opt-in target-runtime smoke test; synthetic CPU clips and bundled ONNX model."""
 import sys
 from pathlib import Path
 
@@ -87,3 +87,44 @@ assert converted.format.id == vs.YUV420P10 and frame.props['_Transfer'] == 16
 assert frame.props['_Primaries'] == 9 and frame.props['_Range'] == 0
 hdr.sdr_preview(converted).get_frame(0)
 print('HDRTVNet++ ONNX inference -> HDR trim -> 10-bit PQ -> SDR preview passed')
+
+# Native subsampling survives AI source preparation; canonicalization performs
+# the necessary upsampling in the same zimg conversion as RGB/color handling.
+assert prepared.format.id == source.format.id
+for chroma in ('auto', 'off'):
+    trial = dict(ai_settings, chroma=chroma)
+    canonical = hdr.ai_input(hdr.prepare_source(source, trial, defaults), trial)
+    pixels = canonical.get_frame(0)
+    assert canonical.format.id == vs.RGBS
+    assert pixels.props['_Transfer'] == 1 and pixels.props['_Primaries'] == 1
+    assert all(np.isfinite(np.asarray(pixels[p])).all() for p in range(3))
+    assert all(np.max(np.abs(np.asarray(pixels[p]) - np.asarray(pixels[0]))) < 1e-5 for p in range(3))
+    legacy = core.resize.Spline36(hdr._linear_rgb(prepared, trial), format=vs.RGBS, primaries_s='709', transfer_s='709')
+    old = legacy.get_frame(0)
+    assert all(np.max(np.abs(np.asarray(pixels[p]) - np.asarray(old[p]))) < 2e-4 for p in range(3))
+print('Fused AI color/chroma conversion matches neutral reference with both reconstruction settings')
+
+# Validate actual Expr/zimg grading against the independent nits reference,
+# including black, diffuse white, compressed highlights and very bright input.
+for nits in (0, 203, 800, 4000):
+    encoded = (pq_code(nits) - 64) / 876
+    prediction = core.std.BlankClip(width=64, height=64, length=1, format=vs.RGBS, color=[encoded] * 3)
+    prediction = core.std.SetFrameProps(prediction, _Transfer=16, _Primaries=9, _Matrix=0, _Range=1)
+    grade = dict(ai_settings, referenceWhite=144, aiExposure=-.5, aiShoulder=.6, peakNits=850)
+    result = hdr.finish_ai(prediction, grade).get_frame(0)
+    expected = pq_code(hdr.ai_mapped_luminance(nits, grade))
+    assert abs(result[0][0, 0] - expected) < 3, (nits, result[0][0, 0], expected)
+print('Custom AI diffuse white, exposure, peak and highlight roll-off match numerical reference')
+
+# Colored patches catch matrix/transfer/range mistakes hidden by neutral clips.
+for matrix, primaries, transfer, full in ((1, 1, 1, 0), (6, 6, 6, 0), (1, 1, 13, 1)):
+    patch = core.std.BlankClip(width=160, height=128, length=1, format=vs.YUV420P8, color=[126, 110, 150])
+    patch = core.std.SetFrameProps(patch, _Transfer=transfer, _Primaries=primaries, _Matrix=matrix, _Range=full)
+    modern = hdr.ai_input(hdr.prepare_source(patch, ai_settings, defaults), ai_settings).get_frame(0)
+    old_prepared = hdr.prepare_source(patch, dict(ai_settings, method='mathematical'), defaults)
+    linear = hdr._linear_rgb(old_prepared, ai_settings)
+    legacy = core.resize.Spline36(linear, format=vs.RGBS, primaries_s='709', transfer_s='709')
+    legacy = core.std.Expr(legacy, 'x 0 max 1 min').get_frame(0)
+    error = max(float(np.max(np.abs(np.asarray(modern[p]) - np.asarray(legacy[p])))) for p in range(3))
+    assert error < 1e-3, (matrix, primaries, transfer, full, error)
+print('Direct AI input matches legacy color reference for BT.709, BT.601 and full-range sRGB patches')

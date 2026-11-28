@@ -55,6 +55,12 @@ def prepare_source(clip, settings, defaults):
     if clip.format.color_family != vs.RGB: tags['_Matrix'] = matrix
     print(f'[hdr-source] matrix={matrix}, primaries={primaries}, transfer={transfer}, range={color_range}; missing SDR tags use configured defaults.')
     clip = core.std.SetFrameProps(clip, **tags)
+    if settings.get('method') == 'hdrtvnet':
+        # Keep native chroma until the model's RGB conversion: no intermediate
+        # YUV444 allocation or RGB -> YUV -> RGB round trip.
+        if clip.format.color_family == vs.YUV and '_ChromaLocation' not in props:
+            clip = core.std.SetFrameProps(clip, _ChromaLocation=0)
+        return clip
     if settings['chroma'] == 'auto' and clip.format.color_family == vs.YUV and (
             clip.format.subsampling_w or clip.format.subsampling_h):
         # Let zimg use the signaled chroma location; use left only if absent.
@@ -87,6 +93,27 @@ def _linear_rgb(clip, settings):
     return core.resize.Spline36(clip, format=vs.RGBS, primaries_s='2020', transfer_s='linear', **kwargs)
 
 
+def ai_input(clip, settings):
+    """Canonical nonlinear BT.709 RGB, with chroma and color converted once."""
+    import vapoursynth as vs
+    core = vs.core
+    frame = clip.get_frame(0)
+    if frame.props.get('_Transfer') in (16, 18):
+        raise ValueError('A filter already produced HDR. Remove it or disable SDR-to-HDR.')
+    resize = core.resize.Spline36 if settings.get('chroma', 'auto') == 'auto' else core.resize.Bilinear
+    if settings['sourceTransfer'] == 'gamma24':
+        # Explicit gamma decoding needs the linear intermediate; normal tagged
+        # BT.709/sRGB/BT.601 inputs use zimg's single combined conversion below.
+        linear = _linear_rgb(clip, settings)
+        canonical = resize(linear, format=vs.RGBS, primaries_s='709', transfer_s='709')
+    else:
+        kwargs = {} if settings['sourceTransfer'] == 'auto' else {'transfer_in_s': settings['sourceTransfer']}
+        if clip.format.color_family != vs.RGB:
+            kwargs['matrix_in'] = frame.props.get('_Matrix', 1)
+        canonical = resize(clip, format=vs.RGBS, primaries_s='709', transfer_s='709', **kwargs)
+    return core.std.Expr(canonical, 'x 0 max 1 min')
+
+
 def convert(clip, settings, model=None, cache=None, backend='tensorrt', builder=None, streams=1, cuda_graph=True):
     import vapoursynth as vs
     core = vs.core
@@ -94,9 +121,7 @@ def convert(clip, settings, model=None, cache=None, backend='tensorrt', builder=
     if settings.get('method') == 'hdrtvnet':
         if not model or not cache or not builder: raise RuntimeError('HDRTVNet++ model/runtime paths are missing.')
         import vk_hdr_ai
-        linear = _linear_rgb(clip, settings)
-        canonical = core.resize.Spline36(linear, format=vs.RGBS, primaries_s='709', transfer_s='709')
-        canonical = core.std.Expr(canonical, 'x 0 max 1 min')
+        canonical = ai_input(clip, settings)
         prediction = vk_hdr_ai.load_model(canonical, model, cache, backend, builder, streams, cuda_graph)
         return finish_ai(prediction, settings)
     rgb = _linear_rgb(clip, settings)
@@ -124,22 +149,43 @@ def _pq_output(expanded):
     return core.std.SetFrameProps(pq, _Matrix=9, _Transfer=16, _Primaries=9, _Range=0)
 
 
+def ai_grade_parameters(settings):
+    peak, white, _ = validate(settings)
+    exposure = float(settings.get('aiExposure', 0))
+    shoulder = float(settings.get('aiShoulder', .75))
+    if not math.isfinite(exposure) or not -2 <= exposure <= 2:
+        raise ValueError('HDRTVNet++ exposure must be between -2 and 2 stops.')
+    if not math.isfinite(shoulder) or not .4 <= shoulder <= .95:
+        raise ValueError('HDRTVNet++ highlight shoulder must be between 40% and 95%.')
+    exponent = math.log(white / peak) / math.log(203 / peak)
+    return exposure, exponent, shoulder
+
+
+def ai_mapped_luminance(nits, settings):
+    """Reference of the fixed AI finish, in nits (before RGB peak limiting)."""
+    peak, _, _ = validate(settings)
+    exposure, exponent, shoulder_start = ai_grade_parameters(settings)
+    shaped = peak * (max(0., nits) * 2 ** exposure / peak) ** exponent
+    knee, shoulder = peak * shoulder_start, peak * (1 - shoulder_start)
+    return shaped if shaped <= knee else knee + shoulder * (-math.expm1(-(shaped - knee) / shoulder))
+
+
 def finish_ai(prediction, settings):
     """Treat model output as PQ, then apply only an HDR exposure/peak trim."""
     import vapoursynth as vs
     core = vs.core
     peak, _, _ = validate(settings)
-    exposure = float(settings.get('aiExposure', 0))
-    if not math.isfinite(exposure) or not -2 <= exposure <= 2:
-        raise ValueError('HDRTVNet++ exposure must be between -2 and 2 stops.')
+    exposure, exponent, shoulder_start = ai_grade_parameters(settings)
     rgb = core.resize.Spline36(prediction, format=vs.RGBS, transfer_s='linear', nominal_luminance=100)
     rgb = core.std.Expr(rgb, f'x 0 max {2 ** exposure} *')
     r, g, b = [core.std.ShufflePlanes(rgb, i, vs.GRAY) for i in range(3)]
     y = core.std.Expr([r, g, b], 'x 0.2627 * y 0.6780 * + z 0.0593 * +')
     maximum = core.std.Expr([r, g, b], 'x y max z max 0.000001 max')
-    # Preserve luminance below 75% of the target peak; smoothly roll off above.
-    knee, shoulder = peak * .75 / 100, peak * .25 / 100
-    mapped = core.std.Expr(y, f'x {knee} > {knee} {shoulder} 1 x {knee} - {shoulder} / -1 * exp - * + x ?')
+    # Fixed, monotone luminance remap: the chosen 203-nit signal reference maps
+    # to the selected diffuse white before the adjustable peak shoulder.
+    shaped = core.std.Expr(y, f'x {peak / 100} / {exponent} pow {peak / 100} *')
+    knee, shoulder = peak * shoulder_start / 100, peak * (1 - shoulder_start) / 100
+    mapped = core.std.Expr(shaped, f'x {knee} > {knee} {shoulder} 1 x {knee} - {shoulder} / -1 * exp - * + x ?')
     gain = core.std.Expr([mapped, y, maximum], f'x y 0.000001 max / {peak / 100} z / min')
     planes = [core.std.Expr([channel, gain], 'x y *') for channel in (r, g, b)]
     linear = core.std.ShufflePlanes(planes, [0, 0, 0], vs.RGB)

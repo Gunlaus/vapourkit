@@ -1,13 +1,13 @@
 # SDR-to-HDR implementation and evaluation
 
-## Current stage: experimental deterministic baseline
+## Mathematical baseline and experimental AI conversion
 
 The right-column SDR → HDR section is disabled by default. Its settings travel
 inside workflow colorimetry, including queue snapshots and TOML exports.
 Natural and Animation are starting expansion strengths, not validated grades.
 Target peak is an upper bound, not measured MaxCLL or display mastering metadata.
 
-The managed pipeline is:
+The mathematical pipeline is:
 
 1. Inspect the source before legacy metadata overrides. Reject PQ/HLG and
    interlaced input. Resolve supported SDR tags, using existing source defaults
@@ -95,9 +95,36 @@ content-addressed private folder. Failure does not silently substitute the
 mathematical method.
 
 Canonical SDR BT.709 RGB enters the network. Its output is already BT.2020 PQ,
-so only an HDR exposure trim and target-peak shoulder are applied afterward.
-Mathematical Look, highlight strength and reference-white controls are hidden
-for this method; Exposure (stops) and target peak control the model's grade.
+so the finishing controls operate in HDR linear light afterward. Mathematical
+highlight expansion stays hidden; AI Look, exposure, diffuse white, target peak
+and highlight roll-off control the resulting grade.
 No second inverse tone map, highlight hallucination, tiling, or temporal
 smoothing is applied. Start tests with a short 1080p HDR-only job and zero
 exposure trim, then compare the mathematical method on the same source.
+
+
+### HDRTVNet++ finishing controls and chroma conversion
+
+AV1 output now leaves profile selection to each encoder with enforced 10-bit
+4:2:0 input. In particular, AV1 NVENC must not receive the unsupported symbolic
+`-profile:v main`. HEVC still explicitly requests Main 10.
+
+Target peak accepts arbitrary integer nits from 400 to 4000. AI finishing exposes
+exposure, diffuse white (80–300 nits), and highlight roll-off start (40–95% of
+peak). Diffuse white remaps the fixed 203-nit signal reference to the selected
+white using a monotone power function normalized to the target peak, followed
+by the exponential shoulder and a shared RGB gain/peak limit. It does not
+measure the scene's actual diffuse white or change trained network weights.
+At 203 nits and 75% roll-off, existing zero-exposure finishing is retained.
+Natural selects these values; Animation selects 144-nit white with zero
+exposure and 75% roll-off, a conservative starting look requiring visual
+assessment. These fixed frame-independent curves add no exposure adaptation.
+The mathematical expansion algorithm is unchanged.
+
+AI source preparation keeps native subsampling until RGB is required. Tagged
+SDR is converted directly to nonlinear BT.709 RGB in one zimg operation;
+explicit gamma-2.4 override retains the necessary linear decoding stage.
+Reconstruction enabled selects Spline36 chroma interpolation, disabled selects
+Bilinear. Both necessarily upsample for full-resolution RGB inference. There
+is no extra early YUV444 intermediate for HDRTVNet++, and no claim that the
+reported fourfold performance difference is resolved without GPU comparison.

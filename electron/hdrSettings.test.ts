@@ -19,6 +19,18 @@ describe('managed HDR output contract', () => {
     expect(args).toContain('bt2020nc');
     expect(args.join(' ')).not.toContain('bt709');
   });
+  it('lets each AV1 encoder select Main from the enforced 10-bit format', () => {
+    for (const codec of ['av1_nvenc', 'libsvtav1', 'av1_qsv', 'av1_amf']) {
+      for (const mode of ['simple', 'advanced'] as const) {
+        const args = hdrEncodingArgs({ ...DEFAULT_ENCODING, mode }, `-c:v ${codec} -b:v 0`);
+        expect(args).not.toContain('-profile:v');
+        expect(args).toContain('yuv420p10le');
+        expect(args).toContain('smpte2084');
+      }
+    }
+    expect(hdrSettingsSchema.parse({ peakNits: 850 }).peakNits).toBe(850);
+    for (const aiShoulder of [.39, .96, NaN]) expect(hdrSettingsSchema.safeParse({ aiShoulder }).success).toBe(false);
+  });
   it('accepts audio settings but refuses video overrides that invalidate the contract', () => {
     const encoding = { ...DEFAULT_ENCODING, mode: 'advanced' as const };
     expect(hdrEncodingArgs(encoding, '-c:v libsvtav1 -crf 25 -c:a aac -b:a 192k')).toContain('aac');

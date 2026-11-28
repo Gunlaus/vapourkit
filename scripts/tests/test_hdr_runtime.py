@@ -25,6 +25,19 @@ class CurveTests(unittest.TestCase):
         self.assertEqual(hdr.mapped_luminance(1, dict(SETTINGS, strength=1)), 1000)
         self.assertEqual(hdr.mapped_luminance(2, dict(SETTINGS, strength=1)), 1000)
 
+    def test_ai_grade_is_monotone_bounded_and_maps_reference_white(self):
+        for white in (80, 144, 203, 300):
+            for shoulder in (.4, .75, .95):
+                settings = dict(SETTINGS, referenceWhite=white, aiShoulder=shoulder)
+                values = [hdr.ai_mapped_luminance(i, settings) for i in range(10001)]
+                self.assertEqual(values[0], 0)
+                self.assertTrue(all(a <= b for a, b in zip(values, values[1:])))
+                self.assertLessEqual(max(values), 1000)
+                self.assertAlmostEqual(hdr.ai_mapped_luminance(203, settings), white)
+        self.assertAlmostEqual(hdr.ai_mapped_luminance(200, dict(SETTINGS, aiExposure=-1)), 100)
+        with self.assertRaises(ValueError): hdr.ai_grade_parameters(dict(SETTINGS, aiShoulder=float('nan')))
+        with self.assertRaises(ValueError): hdr.ai_grade_parameters(dict(SETTINGS, aiExposure=3))
+
     def test_rejects_nonfinite_and_out_of_range_values(self):
         for key, value in [('peakNits', float('nan')), ('referenceWhite', float('inf')), ('strength', 2)]:
             with self.assertRaises(ValueError): hdr.validate(dict(SETTINGS, **{key: value}))
