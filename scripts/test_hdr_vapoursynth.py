@@ -90,7 +90,9 @@ print('HDRTVNet++ ONNX inference -> HDR trim -> 10-bit PQ -> SDR preview passed'
 
 # Native subsampling survives AI source preparation; canonicalization performs
 # the necessary upsampling in the same zimg conversion as RGB/color handling.
-assert prepared.format.id == source.format.id
+assert prepared.format.subsampling_w == source.format.subsampling_w
+assert prepared.format.subsampling_h == source.format.subsampling_h
+assert prepared.format.bits_per_sample == 16
 for chroma in ('auto', 'off'):
     trial = dict(ai_settings, chroma=chroma)
     canonical = hdr.ai_input(hdr.prepare_source(source, trial, defaults), trial)
@@ -120,7 +122,11 @@ print('Custom AI diffuse white, exposure, peak and highlight roll-off match nume
 for matrix, primaries, transfer, full in ((1, 1, 1, 0), (6, 6, 6, 0), (1, 1, 13, 1)):
     patch = core.std.BlankClip(width=160, height=128, length=1, format=vs.YUV420P8, color=[126, 110, 150])
     patch = core.std.SetFrameProps(patch, _Transfer=transfer, _Primaries=primaries, _Matrix=matrix, _Range=full)
-    modern = hdr.ai_input(hdr.prepare_source(patch, ai_settings, defaults), ai_settings).get_frame(0)
+    prepared_patch = hdr.prepare_source(patch, ai_settings, defaults)
+    props = prepared_patch.get_frame(0).props
+    assert props['_Matrix'] == matrix and props['_Primaries'] == primaries and props['_Transfer'] == transfer
+    assert props['_Range'] == full and prepared_patch.format.bits_per_sample == 16
+    modern = hdr.ai_input(prepared_patch, ai_settings).get_frame(0)
     old_prepared = hdr.prepare_source(patch, dict(ai_settings, method='mathematical'), defaults)
     linear = hdr._linear_rgb(old_prepared, ai_settings)
     legacy = core.resize.Spline36(linear, format=vs.RGBS, primaries_s='709', transfer_s='709')

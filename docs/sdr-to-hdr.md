@@ -121,7 +121,9 @@ exposure and 75% roll-off, a conservative starting look requiring visual
 assessment. These fixed frame-independent curves add no exposure adaptation.
 The mathematical expansion algorithm is unchanged.
 
-AI source preparation keeps native subsampling until RGB is required. Tagged
+AI source preparation keeps native YUV subsampling, normalizing depth to 16-bit
+without overwriting source color tags. RGB sources use the existing YUV16 SDR
+filter-chain convention before the model. Tagged
 SDR is converted directly to nonlinear BT.709 RGB in one zimg operation;
 explicit gamma-2.4 override retains the necessary linear decoding stage.
 Reconstruction enabled selects Spline36 chroma interpolation, disabled selects

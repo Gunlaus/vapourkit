@@ -56,10 +56,19 @@ def prepare_source(clip, settings, defaults):
     print(f'[hdr-source] matrix={matrix}, primaries={primaries}, transfer={transfer}, range={color_range}; missing SDR tags use configured defaults.')
     clip = core.std.SetFrameProps(clip, **tags)
     if settings.get('method') == 'hdrtvnet':
-        # Keep native chroma until the model's RGB conversion: no intermediate
-        # YUV444 allocation or RGB -> YUV -> RGB round trip.
+        # Keep native YUV subsampling until model RGB conversion. Normalize to
+        # 16-bit here so the legacy template cannot overwrite source color tags
+        # while selecting its usual YUV16 filter format.
         if clip.format.color_family == vs.YUV and '_ChromaLocation' not in props:
             clip = core.std.SetFrameProps(clip, _ChromaLocation=0)
+        if clip.format.color_family == vs.RGB:
+            # The common SDR filter chain expects YUV16, including custom VS
+            # filters. Keep source primaries/transfer while specifying its matrix.
+            clip = core.resize.Point(clip, format=vs.YUV444P16, matrix_s='709',
+                range_s='full' if color_range == 0 else 'limited', dither_type='none')
+        elif clip.format.bits_per_sample != 16 or clip.format.sample_type != vs.INTEGER:
+            clip = core.resize.Point(clip, format=clip.format.replace(sample_type=vs.INTEGER, bits_per_sample=16).id,
+                range_s='full' if color_range == 0 else 'limited', dither_type='none')
         return clip
     if settings['chroma'] == 'auto' and clip.format.color_family == vs.YUV and (
             clip.format.subsampling_w or clip.format.subsampling_h):
