@@ -22,6 +22,7 @@ export function nativeProcessingFilter(request: NvencRequest): Filter {
       : 'Use standard processing for this workflow.';
     throw new Error(`NVEncC GPU path: ${message} ${advice}`);
   };
+  if (request.colorimetry?.hdr?.enabled) fail('HDR conversion uses the standard pipeline.');
   if (request.benchmark) fail('Use a normal encode for this experimental backend.');
   if (request.segment?.enabled) fail('The first version supports full videos; segment trimming is not yet supported.');
   const enabled = request.filters.filter(f => f.enabled);

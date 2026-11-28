@@ -1,3 +1,4 @@
+import { hdrSettingsSchema, type HdrSettings } from './hdrSettings';
 import { prepareVsShader } from './shaders';
 import type { ShaderSettings } from './shaderTypes';
 // electron/scriptGenerator.ts
@@ -116,6 +117,7 @@ export interface ScriptConfig {
     defaultMatrix: '709' | '170m';
     defaultPrimaries: '709' | '601';
     defaultTransfer: '709' | '170m';
+    hdr?: HdrSettings;
   };
   filters?: Filter[];
   numStreams?: number;
@@ -330,7 +332,7 @@ export class VapourSynthScriptGenerator {
    * renamed over it, so a script starting meanwhile never reads half a file.
    */
   private async syncRuntime(): Promise<void> {
-    for (const helper of ['vk_model_runtime.py', 'vk_rtx_runtime.py']) {
+    for (const helper of ['vk_model_runtime.py', 'vk_rtx_runtime.py', 'vk_hdr_runtime.py']) {
       const helperSource = path.join(fixAsarPath(app.getAppPath()), 'include', helper);
       if (await fs.pathExists(helperSource)) {
         await fs.ensureDir(PATHS.CONFIG);
@@ -381,7 +383,8 @@ export class VapourSynthScriptGenerator {
     const defaultMatrix = config.colorimetry?.defaultMatrix || '709';
     const defaultPrimaries = config.colorimetry?.defaultPrimaries || '709';
     const defaultTransfer = config.colorimetry?.defaultTransfer || '709';
-    const outputFormat = config.outputFormat || 'vs.YUV420P8';
+    const hdr = hdrSettingsSchema.parse(config.colorimetry?.hdr ?? {});
+    const outputFormat = hdr.enabled ? 'vs.YUV420P10' : config.outputFormat || 'vs.YUV420P8';
 
     // Process filters sequentially
     const filters = config.filters || [];
@@ -585,6 +588,28 @@ export class VapourSynthScriptGenerator {
       .replace(/{{OUTPUT_FORMAT}}/g, outputFormat)
       .replace(/{{BACKEND_HELPER}}/g, backendHelper)
       .replace(/{{FILTERS}}/g, filterCode);
+
+    if (hdr.enabled) {
+      const start = '# default values';
+      const end = '# convert to output format and output';
+      if (!template.includes(start) || !template.includes(end)) {
+        throw new Error('HDR conversion requires the current standard script template. Restore the template in Plugins before enabling HDR.');
+      }
+      if (!await fs.pathExists(path.join(PATHS.CONFIG, 'vk_hdr_runtime.py'))) throw new Error('The HDR runtime is missing. Reinstall Vapourkit before enabling SDR-to-HDR.');
+      const runtimePath = pyString(PATHS.CONFIG.replace(/\\/g, '/'));
+      const settings = JSON.stringify(hdr);
+      const defaults = JSON.stringify(config.colorimetry ?? { defaultMatrix: '709', defaultPrimaries: '709' });
+      const setup = `import sys as _vk_hdr_sys\nimport json as _vk_hdr_json\n_vk_hdr_sys.path.insert(0, ${runtimePath})\nimport vk_hdr_runtime as _vk_hdr\n_vk_hdr_settings = _vk_hdr_json.loads(${pyString(settings)})\nclip = _vk_hdr.prepare_source(clip, _vk_hdr_settings, _vk_hdr_json.loads(${pyString(defaults)}))\n\n`;
+      template = template.replace(start, setup + start);
+      const at = template.lastIndexOf(end);
+      const standardTemplate = await fs.readFile(path.join(fixAsarPath(app.getAppPath()), 'include', 'vapoursynth_template.vpy'), 'utf8');
+      const standardTail = standardTemplate.slice(standardTemplate.lastIndexOf(end)).trim();
+      if (template.slice(at).trim() !== standardTail) throw new Error('HDR cannot safely replace a customized output conversion. Restore the standard script template or disable HDR.');
+      template = template.slice(0, at) + `# Managed HDR conversion after all SDR filters.\nclip = _vk_hdr.convert(clip, _vk_hdr_settings)\nclip = vk_timed_output(clip, vk_source_fps, source_timecodes)\n`;
+      if (config.generatePreviewOutputs) {
+        template += `_vk_set_output(_vk_hdr.sdr_preview(clip), ${Math.max(previewOutputIndex + 1, SIDE_CHAIN_OUTPUT_BASE + sideChains.length)}, "HDR — SDR preview")\n`;
+      } else template += 'clip.set_output()\n';
+    }
 
     // Remove the final clip.set_output() call if we're generating preview outputs
     // since we want only the numbered outputs for vs-view

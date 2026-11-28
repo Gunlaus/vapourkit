@@ -42,10 +42,10 @@ export interface PipeArgsInput {
  * the BT.709 limited-range tags the template's YUV output is converted to
  * (vspipe writes no colour elements).
  */
-function pipeInputArgs(outputInfo: OutputInfo): string[] {
+function pipeInputArgs(outputInfo: OutputInfo, hdr = false): string[] {
   const args = ['-f', 'matroska'];
   if (!isRgbFormat(outputInfo.pixelFormat)) {
-    args.push('-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709');
+    args.push('-color_range', 'tv', '-colorspace', hdr ? 'bt2020nc' : 'bt709', '-color_primaries', hdr ? 'bt2020' : 'bt709', '-color_trc', hdr ? 'smpte2084' : 'bt709');
   }
   args.push('-i', 'pipe:0');
   return args;
@@ -59,7 +59,7 @@ function pipeInputArgs(outputInfo: OutputInfo): string[] {
  */
 export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
   const { inputPath, outputPath, metadata, outputInfo, ffmpegConfig, audioTrim } = input;
-  const ffmpegArgs: string[] = ['-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', ...pipeInputArgs(outputInfo)];
+  const ffmpegArgs: string[] = ['-hide_banner', '-nostats', '-stats_period', '0.5', '-progress', 'pipe:2', ...pipeInputArgs(outputInfo, ffmpegConfig.hdr)];
 
   if (input.benchmarkMode) {
     ffmpegArgs.push('-f', 'null', '-');
@@ -118,7 +118,8 @@ export function buildPipeFFmpegArgs(input: PipeArgsInput): string[] {
   // avoid throwaway previews, while slow renders retain their original cadence.
   // Keep the timestamp changes scoped to this preview output.
   const interval = 1 / previewFps;
-  ffmpegArgs.push('-vf', `select='if(gte(abs(time(0)-ld(0)),${interval})*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,${interval})),st(0,time(0))*0+1,0)',scale=-2:${height}`);
+  const toneMap = ffmpegConfig.hdr ? 'zscale=transfer=linear:npl=100,format=gbrpf32le,tonemap=tonemap=mobius:desat=0,zscale=primaries=bt709:transfer=bt709:matrix=bt709:range=full,' : '';
+  ffmpegArgs.push('-vf', `select='if(gte(abs(time(0)-ld(0)),${interval})*if(isnan(prev_selected_t),1,gte(t-prev_selected_t,${interval})),st(0,time(0))*0+1,0)',${toneMap}scale=-2:${height}`);
   ffmpegArgs.push('-fps_mode:v:0', 'vfr');
   ffmpegArgs.push('-f', 'image2pipe');
   ffmpegArgs.push('-c:v', 'mjpeg');

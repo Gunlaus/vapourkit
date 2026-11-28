@@ -1,3 +1,4 @@
+import { hdrCompatibleEncoding } from '../electron/hdrSettings';
 import { MediaTracksPanel } from './components/MediaTracksPanel';
 // src/App.tsx - Refactored with extracted components and hooks
 
@@ -157,8 +158,8 @@ function App() {
   } = workflow.view;
   const { patch: patchWorkflow } = workflow;
   const setSelectedModel = useCallback((model: string | null) => patchWorkflow({ selectedModel: model }), [patchWorkflow]);
-  const handleUpdateEncoding = useCallback((next: EncodingSettings) => patchWorkflow({ encoding: next }), [patchWorkflow]);
-  const handleUpdateProcessingFormat = useCallback((format: string) => patchWorkflow({ processingFormat: format }), [patchWorkflow]);
+  const handleUpdateEncoding = useCallback((next: EncodingSettings) => patchWorkflow({ encoding: colorimetrySettings.hdr?.enabled ? hdrCompatibleEncoding(next) : next }), [patchWorkflow, colorimetrySettings]);
+  const handleUpdateProcessingFormat = useCallback((format: string) => patchWorkflow({ processingFormat: colorimetrySettings.hdr?.enabled ? 'vs.YUV420P10' : format }), [patchWorkflow, colorimetrySettings]);
   const handleUpdateOutputFormat = useCallback((format: string) => patchWorkflow({ outputFormat: format }), [patchWorkflow]);
   const handleUpdateVideoCompareArgs = useCallback((args: string) => patchWorkflow({ videoCompareArgs: args }), [patchWorkflow]);
   const handleResetVideoCompareArgs = useCallback(async () => {
@@ -176,9 +177,10 @@ function App() {
   const updateNumStreams = useCallback((streams: number) => patchWorkflow({ numStreams: streams }), [patchWorkflow]);
   const setSegment = useCallback((next: SegmentSelection) => patchWorkflow({ segment: next }), [patchWorkflow]);
   const handleColorimetryChange = useCallback((settings: ColorimetrySettings) => {
-    patchWorkflow({ colorimetry: settings });
-    addConsoleLog(`Colorimetry settings updated: ${settings.overwriteMatrix ? (settings.matrix709 ? 'BT.709' : 'BT.601') : 'disabled'}`);
-  }, [patchWorkflow, addConsoleLog]);
+    patchWorkflow({ colorimetry: settings, ...(settings.hdr?.enabled ? { encoding: hdrCompatibleEncoding(encoding), processingFormat: 'vs.YUV420P10' } : {}) });
+    if (!!settings.hdr?.enabled !== !!colorimetrySettings.hdr?.enabled) addConsoleLog(`SDR-to-HDR ${settings.hdr?.enabled ? 'enabled' : 'disabled'}`);
+    else if (!settings.hdr?.enabled) addConsoleLog(`Colorimetry settings updated: ${settings.overwriteMatrix ? (settings.matrix709 ? 'BT.709' : 'BT.601') : 'disabled'}`);
+  }, [patchWorkflow, addConsoleLog, encoding, colorimetrySettings]);
 
   // Model management hooks
   const {
@@ -1258,7 +1260,8 @@ function App() {
                     outputPath={outputPath}
                     outputFormat={outputFormat}
                     encoding={encoding}
-                    processingFormat={processingFormat}
+                    processingFormat={colorimetrySettings.hdr?.enabled ? 'vs.YUV420P10' : processingFormat}
+                    hdrEnabled={!!colorimetrySettings.hdr?.enabled}
                     isProcessing={isProcessing}
                     benchmarkMode={benchmarkMode}
                     privacyMode={privacyMode}

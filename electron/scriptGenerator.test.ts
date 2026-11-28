@@ -90,7 +90,7 @@ async function generate(
 beforeAll(async () => {
   await fs.ensureDir(path.join(testRoot, 'include'));
   await fs.copy(path.join(__dirname, '..', 'include', 'shaders'), path.join(testRoot, 'include', 'shaders'));
-  for (const file of ['vk_rtx_runtime.py', 'build_trt_engine.py']) {
+  for (const file of ['vk_rtx_runtime.py', 'vk_hdr_runtime.py', 'build_trt_engine.py']) {
     await fs.copy(path.join(__dirname, '..', 'include', file), path.join(testRoot, 'include', file));
   }
   await fs.copy(path.join(__dirname, '..', 'include', 'vk_model_runtime.py'), path.join(testRoot, 'include', 'vk_model_runtime.py'));
@@ -100,6 +100,7 @@ beforeAll(async () => {
   const configDir = path.join(testRoot, 'data', 'config');
   await fs.ensureDir(configDir);
   await fs.copy(templateSrc, path.join(configDir, 'vapoursynth_template.vpy'));
+  await fs.copy(templateSrc, path.join(testRoot, 'include', 'vapoursynth_template.vpy'));
   // The bundled runtime sits under the app path, which generateScript copies
   // it into config/ from
   await fs.copy(RUNTIME_SRC, path.join(testRoot, 'include', 'vk_runtime.py'));
@@ -896,4 +897,21 @@ it('emits multiple standard shader steps around VS filters for CPU encoding and 
   expect(script).toContain('clip.format.replace(sample_type=vs.INTEGER, bits_per_sample=16).id');
   expect(script.indexOf('core.placebo.Shader')).toBeLessThan(script.indexOf('# Custom Filter: Blur'));
   expect(script.lastIndexOf('core.placebo.Shader')).toBeGreaterThan(script.indexOf('# Custom Filter: Blur'));
+});
+
+
+it('reconstructs source chroma before SDR filters and converts HDR only after the chain', async () => {
+  const generator = new VapourSynthScriptGenerator('win32');
+  const colorimetry = { overwriteMatrix: false, matrix709: true, defaultMatrix: '709' as const, defaultPrimaries: '709' as const, defaultTransfer: '709' as const,
+    hdr: { enabled: true, preset: 'natural' as const, peakNits: 1000, referenceWhite: 203, strength: 0.35, chroma: 'auto' as const, sourceTransfer: 'auto' as const } };
+  for (const generatePreviewOutputs of [false, true]) {
+    const file = await generator.generateScript({ inputVideo: 'source.mkv', filters: [customFilter(0, 'SDR filter', 'clip = core.std.BoxBlur(clip)')], colorimetry, generatePreviewOutputs });
+    const script = await fs.readFile(file, 'utf8'); await fs.remove(file);
+    expect(script.indexOf('_vk_hdr.prepare_source')).toBeLessThan(script.indexOf('core.std.BoxBlur'));
+    expect(script.indexOf('core.std.BoxBlur')).toBeLessThan(script.indexOf('_vk_hdr.convert'));
+    expect(script).not.toContain('transfer_s="709", dither_type="error_diffusion", matrix_s="709"');
+    expect(script).toContain('output_format     = vs.YUV420P10');
+    if (generatePreviewOutputs) expect(script).toContain('HDR — SDR preview');
+    else expect(script).toContain('clip.set_output()');
+  }
 });

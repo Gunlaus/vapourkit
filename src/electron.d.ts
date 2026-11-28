@@ -1,3 +1,4 @@
+import type { HdrSettings } from '../electron/hdrSettings';
 // src/electron.d.ts
 import type { BackendId, FilterBackend } from '../electron/providers/descriptors';
 import type { SideChainAlignment } from '../electron/chainGraph';
@@ -867,6 +868,7 @@ export interface ColorimetrySettings {
   defaultMatrix: '709' | '170m';
   defaultPrimaries: '709' | '601';
   defaultTransfer: '709' | '170m';
+  hdr?: HdrSettings;
 }
 
 export interface FilterTemplate {

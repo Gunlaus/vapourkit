@@ -1,3 +1,4 @@
+import { verifyHdrOutput } from './hdrOutput';
 import { pipelineResult } from './pipelineResult';
 import { MatroskaPipe } from './matroskaPipe';
 import { FFmpegProgress } from './ffmpegProgress';
@@ -617,9 +618,22 @@ export class UpscaleExecutor {
       this.diagnostic('Processing cancelled; a partial output may have been saved.');
       reject(new Error('Processing was stopped'));
     };
-    const complete = () => {
+    let verifyingOutput = false;
+    const complete = async () => {
       if (this.isStopped) { stopped(); return; }
-      if (failed || completed || !vspipeSucceeded || !ffmpegSucceeded) return;
+      if (failed || completed || verifyingOutput || !vspipeSucceeded || !ffmpegSucceeded) return;
+      if (!benchmarkMode && configManager.getColorimetrySettings?.()?.hdr?.enabled) {
+        verifyingOutput = true;
+        try {
+          const ffprobe = FFmpegManager.getFFprobePath();
+          if (!ffprobe) throw new Error('FFprobe is missing; HDR output could not be verified.');
+          await verifyHdrOutput(outputPath, ffprobe, this.stopController.signal);
+          if (this.isStopped) { stopped(); return; }
+        } catch (error) {
+          fail('HDR Output Error', error instanceof Error ? error.message : String(error));
+          return;
+        }
+      }
       completed = true;
       summary('completed');
       if (benchmarkMode) {

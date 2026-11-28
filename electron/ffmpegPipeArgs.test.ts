@@ -121,3 +121,13 @@ describe('movflags', () => {
     expect(movflagsFor('C:/out.mp4', { videoArgs: ['-c:v', 'libx264', '-movflags', '+frag_keyframe'] })).toEqual([]);
   });
 });
+
+
+it('signals PQ HDR on the pipe and tone maps only the JPEG preview', () => {
+  const args = build({ ffmpegConfig: { hdr: true, videoArgs: ['-c:v', 'libx265', '-pix_fmt', 'yuv420p10le', '-color_trc', 'smpte2084'] } });
+  const source = args.slice(0, args.indexOf('pipe:0'));
+  expect(source).toContain('bt2020nc'); expect(source).toContain('smpte2084'); expect(source).not.toContain('bt709');
+  const main = args.slice(0, args.indexOf('C:/out.mp4'));
+  expect(main.join(' ')).not.toContain('tonemap=');
+  expect(args.slice(args.indexOf('C:/out.mp4') + 1).join(' ')).toContain('tonemap=tonemap=mobius');
+});

@@ -1,3 +1,4 @@
+import { HdrPanel } from './HdrPanel';
 import { memo } from 'react';
 import type { BackendId, ModelFile, ColorimetrySettings, FilterTemplate, VideoInfo, Filter } from '../electron.d';
 import { DynamicFilterPanel, type LutPanelActions } from './DynamicFilterPanel';
@@ -61,6 +62,8 @@ export const ModelSelectionPanel = memo<ModelSelectionPanelProps>(({
       />
 
 
+
+      <HdrPanel settings={colorimetrySettings} disabled={isProcessing} onChange={onColorimetryChange} />
 
       {/* Filter Panel */}
       <DynamicFilterPanel

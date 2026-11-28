@@ -1,3 +1,4 @@
+import { hdrEncodingArgs } from './hdrSettings';
 // electron/ffmpegSettingsManager.ts
 import { logger } from './logger';
 import type { ConfigManager } from './configManager';
@@ -5,6 +6,7 @@ import { DEFAULT_FFMPEG_ARGS } from './configManager';
 import { splitArgs } from './encodingSettings';
 
 export interface FFmpegConfig {
+  hdr?: boolean;
   /** Video encoding arguments (e.g., codec, preset, quality) */
   videoArgs?: string[];
   /** Whether to preserve display aspect ratio from input */
@@ -42,7 +44,10 @@ export class FFmpegSettingsManager {
       const encoding = configManager.getEncodingSettings();
       // Only videoArgs: the user controls everything else on the command line.
       return {
-        videoArgs: FFmpegSettingsManager.parseArgsString(configManager.getFfmpegArgs()),
+        videoArgs: configManager.getColorimetrySettings?.()?.hdr?.enabled
+          ? hdrEncodingArgs(encoding, configManager.getFfmpegArgs())
+          : FFmpegSettingsManager.parseArgsString(configManager.getFfmpegArgs()),
+        hdr: !!configManager.getColorimetrySettings?.()?.hdr?.enabled,
         audioTracks: encoding.audioTracks,
         subtitleTracks: encoding.subtitleTracks,
         fastStart: encoding.mode === 'simple' ? encoding.simple.fastStart : true,
@@ -51,6 +56,7 @@ export class FFmpegSettingsManager {
         movflags: []
       };
     } catch (error) {
+      if (configManager.getColorimetrySettings?.()?.hdr?.enabled) throw error;
       logger.warn('Failed to load FFmpeg settings from ConfigManager, using defaults:', error);
       return FFmpegSettingsManager.DEFAULT_CONFIG;
     }

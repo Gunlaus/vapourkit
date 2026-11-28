@@ -1,3 +1,4 @@
+import { hdrSettingsSchema, type HdrSettings } from './hdrSettings';
 import { pipelineSettingsSchema, type PipelineSettings } from './pipelineSettings';
 import { modelMetadataKey } from './modelIdentity';
 // electron/configManager.ts
@@ -42,6 +43,7 @@ interface AppConfig {
     defaultMatrix: '709' | '170m';
     defaultPrimaries: '709' | '601';
     defaultTransfer: '709' | '170m';
+    hdr?: HdrSettings;
   };
   showQueue?: boolean;
   filterConfigurations?: Filter[];
@@ -408,11 +410,12 @@ export class ConfigManager {
     await this.save();
   }
 
-  getColorimetrySettings(): { overwriteMatrix: boolean; matrix709: boolean; defaultMatrix: '709' | '170m'; defaultPrimaries: '709' | '601'; defaultTransfer: '709' | '170m' } {
+  getColorimetrySettings(): { overwriteMatrix: boolean; matrix709: boolean; defaultMatrix: '709' | '170m'; defaultPrimaries: '709' | '601'; defaultTransfer: '709' | '170m'; hdr?: HdrSettings } {
     return this.config.colorimetry || DEFAULT_CONFIG.colorimetry!;
   }
 
-  async setColorimetrySettings(settings: { overwriteMatrix: boolean; matrix709: boolean; defaultMatrix: '709' | '170m'; defaultPrimaries: '709' | '601'; defaultTransfer: '709' | '170m' }): Promise<void> {
+  async setColorimetrySettings(settings: { overwriteMatrix: boolean; matrix709: boolean; defaultMatrix: '709' | '170m'; defaultPrimaries: '709' | '601'; defaultTransfer: '709' | '170m'; hdr?: HdrSettings }): Promise<void> {
+    if (settings.hdr) hdrSettingsSchema.parse(settings.hdr);
     this.config.colorimetry = settings;
     await this.save();
   }
@@ -464,6 +467,7 @@ export class ConfigManager {
   }
 
   getProcessingFormat(): string {
+    if (this.getColorimetrySettings().hdr?.enabled) return 'vs.YUV420P10';
     const format = this.config.processingFormat ?? 'vs.YUV420P8';
     // Never return match_input as it's experimental - fallback to YUV420P8
     return format === 'match_input' ? 'vs.YUV420P8' : format;

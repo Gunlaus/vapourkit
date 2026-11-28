@@ -1,3 +1,4 @@
+import { hdrEncodingArgs } from '../../electron/hdrSettings';
 import { EncodingSupportPanel } from './EncodingSupportPanel';
 import { GuidedEncodingControls } from './GuidedEncodingControls';
 // OutputSettingsPanel.tsx
@@ -34,6 +35,7 @@ interface OutputSettingsPanelProps {
   outputFormat: string;
   encoding: EncodingSettings;
   processingFormat: string;
+  hdrEnabled?: boolean;
   isProcessing: boolean;
   benchmarkMode: boolean;
   privacyMode: boolean;
@@ -50,6 +52,7 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
   outputFormat,
   encoding,
   processingFormat,
+  hdrEnabled = false,
   isProcessing,
   benchmarkMode,
   privacyMode,
@@ -270,10 +273,10 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
                 disabled={isProcessing}
                 className="w-full h-7 bg-ink-850 border border-ink-750 rounded px-2 text-[12.5px] focus:outline-none focus:border-accent-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <option value="h264">H.264 (AVC)</option>
+                <option value="h264" disabled={hdrEnabled}>H.264 (AVC)</option>
                 <option value="h265">H.265 (HEVC)</option>
                 <option value="av1">AV1</option>
-                <option value="prores">ProRes</option>
+                <option value="prores" disabled={hdrEnabled}>ProRes</option>
               </select>
             </div>
 
@@ -284,8 +287,8 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
               </label>
               <select
                 value={processingFormat}
+                disabled={isProcessing || hdrEnabled}
                 onChange={(e) => onProcessingFormatChange(e.target.value)}
-                disabled={isProcessing}
                 className="w-full h-7 bg-ink-850 border border-ink-750 rounded px-2 text-[12.5px] focus:outline-none focus:border-accent-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="vs.YUV420P8" disabled={config.codec === 'prores'}>YUV 4:2:0 8-Bit</option>
@@ -430,6 +433,12 @@ export const OutputSettingsPanel = memo<OutputSettingsPanelProps>(({
           </>
         )}
 
+        {hdrEnabled && <div className="text-xs text-accent-400">PQ HDR · BT.2020 · 10-bit (managed)
+          <details className="text-ink-400"><summary>Effective video arguments</summary><pre className="whitespace-pre-wrap break-all">{(() => {
+            try { return hdrEncodingArgs(encoding, showAdvanced ? encoding.customArgs : simpleArgs).join(' '); }
+            catch (error) { return error instanceof Error ? error.message : String(error); }
+          })()}</pre></details>
+        </div>}
         {/* Advanced Mode - Raw FFmpeg Args */}
         {showAdvanced && (
           <div>

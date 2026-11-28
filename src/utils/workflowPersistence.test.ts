@@ -367,3 +367,15 @@ describe('explicit fresh working session', () => {
     expect(storage.getItem('filters')).toBe('[]');
   });
 });
+
+
+it('preserves HDR conversion settings in queue snapshots and across settings edits', () => {
+  const app = new Session(projectConfig());
+  const hdr = { enabled: true, preset: 'natural' as const, peakNits: 1000, referenceWhite: 203, strength: 0.35, chroma: 'auto' as const, sourceTransfer: 'auto' as const };
+  app.dispatch({ type: 'patch', patch: { colorimetry: { ...COLOR, hdr } } });
+  const queue = toQueueWorkflow(app.view);
+  expect(queue.colorimetry?.hdr).toEqual(hdr);
+  expect(fromQueueWorkflow(queue, app.view).colorimetry.hdr).toEqual(hdr);
+  app.dispatch({ type: 'patch', patch: { colorimetry: { ...app.view.colorimetry, overwriteMatrix: true } } });
+  expect(app.view.colorimetry.hdr).toEqual(hdr);
+});

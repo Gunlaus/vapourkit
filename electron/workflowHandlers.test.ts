@@ -35,6 +35,15 @@ describe('workflow encoding settings', () => {
     expect(imported.workflow.encodingSettings.defaultBackend).toBe('directml');
   });
 
+  it('round-trips managed HDR settings inside colorimetry', async () => {
+    const hdr = { enabled: true, preset: 'natural', peakNits: 1000, referenceWhite: 203, strength: 0.35, chroma: 'auto', sourceTransfer: 'auto' };
+    const colorimetry = { overwriteMatrix: false, matrix709: true, defaultMatrix: '709', defaultPrimaries: '709', defaultTransfer: '709', hdr };
+    const workflow = { name: 'HDR', version: '1.0', filters: [], encodingSettings: { ...encodingSettings, colorimetry } };
+    expect(await invoke('export-workflow', workflow, file)).toEqual({ success: true });
+    const imported = await invoke('import-workflow', file);
+    expect(imported.workflow.encodingSettings.colorimetry.hdr).toEqual(hdr);
+  });
+
   it('imports a workflow written without one', async () => {
     const workflow = { name: 'w', version: '1.0', filters: [], encodingSettings };
     await invoke('export-workflow', workflow, file);
